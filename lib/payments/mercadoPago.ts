@@ -80,6 +80,9 @@ export class MercadoPagoGateway implements PaymentGateway {
   }
 
   async parseWebhook(input: WebhookVerificationInput): Promise<WebhookNotification | null> {
+    if (!input.signatureHeader || input.signatureHeader.length > 512 || !input.requestIdHeader || input.requestIdHeader.length > 256) {
+      throw new InvalidWebhookRequestError("Cabeçalhos obrigatórios ausentes ou inválidos.");
+    }
     const dataId = input.searchParams.get("data.id") ?? input.searchParams.get("id");
     const topic = input.searchParams.get("type") ?? input.searchParams.get("topic");
 

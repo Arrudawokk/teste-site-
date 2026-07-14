@@ -20,6 +20,12 @@ export type PaymentStatus =
   | "refunded"
   | "charged_back";
 
+export type DeliveryDetails =
+  | { status: "pending" }
+  | { status: "ready"; downloadUrl: string }
+  | { status: "unavailable" }
+  | { status: "revoked" };
+
 export type Payer = {
   email: string;
   firstName: string;

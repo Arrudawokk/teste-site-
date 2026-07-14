@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getProductBySlug } from "@/lib/catalog";
+import { getDeliveryDetails } from "@/lib/payments/delivery";
 import { getPaymentGateway } from "@/lib/payments/gateway";
 import { PaymentGatewayError } from "@/lib/payments/interfaces";
-import { getOrderStore, type OrderRecord } from "@/lib/payments/orderStore";
+import { getOrderStore, OrderStoreUnavailableError, type OrderRecord } from "@/lib/payments/orderStore";
+import { reconcilePayment } from "@/lib/payments/reconciliation";
 import type { CreatePaymentInput, PaymentResult } from "@/lib/payments/types";
 import { isValidCpf, isValidEmail, onlyDigits, splitFullName } from "@/lib/payments/utils";
+import { logger } from "@/lib/server/logger";
 
 export const runtime = "nodejs";
 
@@ -30,7 +33,7 @@ function badRequest(message: string) {
 
 function isAllowedOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
-  if (!origin) return true;
+  if (!origin) return process.env.NODE_ENV !== "production";
 
   const allowedOrigins = new Set([new URL(request.url).origin]);
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
@@ -50,8 +53,8 @@ function getNotificationUrl(): string | null {
 
   try {
     const url = new URL(configuredSiteUrl);
-    const isLocalDevelopment = process.env.NODE_ENV === "development" && ["localhost", "127.0.0.1"].includes(url.hostname);
-    if (url.protocol !== "https:" && !isLocalDevelopment) return null;
+    const localDevelopment = process.env.NODE_ENV === "development" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    if (url.protocol !== "https:" && !localDevelopment) return null;
     return new URL("/api/payments/webhook", url).toString();
   } catch {
     return null;
@@ -62,19 +65,17 @@ function isSameOrder(order: OrderRecord, productSlug: string, method: "pix" | "c
   return order.productSlug === productSlug && order.method === method && order.payerEmail.toLowerCase() === email.toLowerCase();
 }
 
-function paymentMatchesOrder(order: OrderRecord, payment: PaymentResult): boolean {
-  return (
-    payment.externalReference === order.externalReference &&
-    payment.method === order.method &&
-    payment.currency === order.currency &&
-    Math.round(payment.amount * 100) === Math.round(order.amount * 100) &&
-    Boolean(payment.payerEmail) &&
-    payment.payerEmail?.toLowerCase() === order.payerEmail.toLowerCase()
+function paymentResponse(result: PaymentResult, order: OrderRecord, status = 201) {
+  return json(
+    {
+      orderId: order.externalReference,
+      status: order.status,
+      pix: result.pix,
+      delivery: getDeliveryDetails(order),
+      purchaseEventId: order.status === "approved" ? order.externalReference : undefined,
+    },
+    status,
   );
-}
-
-function paymentResponse(result: PaymentResult, orderId: string, status = 201) {
-  return json({ orderId, status: result.status, pix: result.pix }, status);
 }
 
 export async function POST(request: Request) {
@@ -102,7 +103,6 @@ export async function POST(request: Request) {
   const name = body.payer?.name?.trim();
   const email = body.payer?.email?.trim().toLowerCase();
   const document = body.payer?.document ? onlyDigits(body.payer.document) : "";
-
   if (!name || name.length < 2 || name.length > 120) return badRequest("Nome inválido.");
   if (!email || email.length > 254 || !isValidEmail(email)) return badRequest("E-mail inválido.");
   if (!isValidCpf(document)) return badRequest("CPF inválido.");
@@ -137,50 +137,52 @@ export async function POST(request: Request) {
     input = { ...basePayload, method: "card", cardToken, paymentMethodId, installments };
   }
 
-  const orderStore = getOrderStore();
-  const now = new Date().toISOString();
-  const created = await orderStore.create({
-    externalReference,
-    productSlug: product.slug,
-    amount: product.price,
-    currency: product.currency,
-    payerEmail: email,
-    method: body.method,
-    status: "pending",
-    createdAt: now,
-    updatedAt: now,
-  });
+  try {
+    const orderStore = getOrderStore();
+    const now = new Date().toISOString();
+    const initialOrder: OrderRecord = {
+      externalReference,
+      productSlug: product.slug,
+      amount: product.price,
+      currency: product.currency,
+      payerEmail: email,
+      method: body.method,
+      status: "pending",
+      accessStatus: "pending",
+      createdAt: now,
+      updatedAt: now,
+    };
+    const created = await orderStore.create(initialOrder);
 
-  if (!created) {
-    const existing = await orderStore.getByExternalReference(externalReference);
-    if (!existing || !isSameOrder(existing, product.slug, body.method, email)) {
-      return json({ error: "A chave de idempotência já foi utilizada em outro pedido." }, 409);
-    }
-
-    if (existing.gatewayPaymentId) {
-      try {
+    if (!created) {
+      const existing = await orderStore.getByExternalReference(externalReference);
+      if (!existing || !isSameOrder(existing, product.slug, body.method, email)) {
+        return json({ error: "A chave de idempotência já foi utilizada em outro pedido." }, 409);
+      }
+      if (existing.gatewayPaymentId) {
         const existingPayment = await getPaymentGateway().getPayment(existing.gatewayPaymentId);
-        if (!paymentMatchesOrder(existing, existingPayment)) {
-          return json({ error: "O pagamento existente não corresponde ao pedido." }, 409);
-        }
-        await orderStore.updateStatusByGatewayPaymentId(existing.gatewayPaymentId, existingPayment.status);
-        return paymentResponse(existingPayment, externalReference, 200);
-      } catch (error) {
-        if (error instanceof PaymentGatewayError) return json({ error: "Não foi possível consultar o pagamento. Tente novamente." }, 502);
-        return json({ error: "Não foi possível consultar o pagamento." }, 500);
+        const reconciled = await reconcilePayment(orderStore, existing, existingPayment);
+        if (!reconciled.order) return json({ error: "O pagamento existente não corresponde ao pedido." }, 409);
+        return paymentResponse(existingPayment, reconciled.order, 200);
       }
     }
-  }
 
-  try {
     const result = await getPaymentGateway().createPayment(input);
-    const attached = await orderStore.attachGatewayPaymentId(externalReference, result.gatewayPaymentId, result.status);
-    if (!attached) return json({ error: "Não foi possível reconciliar o pagamento com o pedido." }, 409);
-    return paymentResponse(result, externalReference);
+    const currentOrder = (await orderStore.getByExternalReference(externalReference)) ?? initialOrder;
+    const reconciled = await reconcilePayment(orderStore, currentOrder, result);
+    if (!reconciled.order) return json({ error: "Não foi possível reconciliar o pagamento com o pedido." }, 409);
+    logger.info("payment.created", { orderId: externalReference, gatewayPaymentId: result.gatewayPaymentId, status: reconciled.order.status });
+    return paymentResponse(result, reconciled.order);
   } catch (error) {
+    if (error instanceof OrderStoreUnavailableError) {
+      logger.error("payment.store_unavailable", { orderId: externalReference });
+      return json({ error: "Checkout temporariamente indisponível." }, 503);
+    }
     if (error instanceof PaymentGatewayError) {
+      logger.warn("payment.gateway_unavailable", { orderId: externalReference });
       return json({ error: "Não foi possível processar o pagamento. Tente novamente." }, 502);
     }
+    logger.error("payment.create_failed", { orderId: externalReference });
     return json({ error: "Não foi possível processar o pagamento." }, 500);
   }
 }

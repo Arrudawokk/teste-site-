@@ -63,5 +63,11 @@ export const products = [
     accessLabel: "Permanente",
     guaranteeDays: 7,
     platforms: ["Meta Ads", "Google Ads", "TikTok Ads"],
+    delivery: {
+      sourceUrlEnvironmentVariable: "PRODUCT_TRAFEGO_DOWNLOAD_URL",
+      sourceAuthorizationEnvironmentVariable: "PRODUCT_TRAFEGO_DOWNLOAD_AUTHORIZATION",
+      fileName: "trafego-pago-do-zero-a-escala.pdf",
+      contentType: "application/pdf",
+    },
   },
 ] as const satisfies readonly Product[];

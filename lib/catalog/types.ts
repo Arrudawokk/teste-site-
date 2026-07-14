@@ -49,6 +49,13 @@ export type ProductSeo = {
   twitterImage?: string;
 };
 
+export type ProductDelivery = {
+  sourceUrlEnvironmentVariable: string;
+  sourceAuthorizationEnvironmentVariable?: string;
+  fileName: string;
+  contentType: "application/pdf" | "application/epub+zip" | "application/zip";
+};
+
 export type Product = {
   slug: string;
   title: string;
@@ -77,4 +84,5 @@ export type Product = {
   accessLabel: string;
   guaranteeDays: number;
   platforms: string[];
+  delivery: ProductDelivery;
 };
