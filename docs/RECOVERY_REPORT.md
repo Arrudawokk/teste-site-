@@ -83,10 +83,12 @@ Depois da promoção:
 - **Main:** promovida por fast-forward de `7661351` para `eb5d84a`, incorporando os doze commits RC1–RC4 sem conflito.
 - **Build local:** `npm install`, ESLint, TypeScript e build aprovados; 33 páginas/rotas geradas.
 - **Deployments:** `teste-site` e `teste-site-qnxk` concluíram novos deployments de produção com status `success` a partir de `eb5d84a`.
+- **Documentação final:** o commit `e4ee8e2` também concluiu os dois deployments de produção com status `success`.
 - **Produção operacional:** `https://teste-site-qnxk.vercel.app` serve a RC4; o HTML público contém a navegação da área do cliente.
 - **Rotas validadas:** `/`, `/products/trafego-pago-do-zero-a-escala`, `/checkout`, `/blog` e `/account` respondem HTTP 200.
 - **404 diagnosticado:** `https://teste-site.vercel.app` continua sem alias atribuído e não alcança a aplicação. O endereço correto de produção é `https://teste-site-qnxk.vercel.app`.
 - **Configuração Vercel:** Root Directory `.`, preset Next.js, instalação/build padrão e output automático foram confirmados pelo sucesso de Preview e Production. A revisão visual do painel depende de autenticação Vercel e não foi usada para inferir valores de ambiente.
+- **Pull requests:** a PR RC1 foi reconhecida como incorporada; as PRs empilhadas RC2, RC3 e RC4 foram encerradas como substituídas pela promoção integral já presente na `main`, sem novos merges.
 
 ## Status da recuperação
 
