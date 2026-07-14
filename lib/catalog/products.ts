@@ -6,7 +6,7 @@ export const products = [
     title: "Tráfego Pago: do Zero à Escala",
     subtitle: "O guia prático para criar campanhas com método, interpretar métricas e transformar investimento em crescimento previsível.",
     description: "Um método prático e visual para criar, otimizar e escalar campanhas em Meta Ads, Google Ads e TikTok Ads com clareza, dados e uma sequência de execução.",
-    shortDescription: "Crie, analise e escale campanhas lucrativas com um método claro para as principais plataformas de anúncios.",
+    shortDescription: "Crie, analise e evolua campanhas com um método claro para as principais plataformas de anúncios.",
     price: 47,
     currency: "BRL",
     coverImage: "/ebook-trafego.png.png",

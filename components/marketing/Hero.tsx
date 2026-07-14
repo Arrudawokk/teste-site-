@@ -42,7 +42,7 @@ export function Hero({ product }: { product: Product }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.08, ease }}
             >
-              {titleLead}{titleRest.length > 0 ? "." : ""}<br />
+              {titleLead}{titleRest.length > 0 ? ":" : ""}<br />
               {titleRest.length > 0 ? <span className="gradient-text">{titleRest.join(":").trim()}.</span> : null}
             </motion.h1>
 
