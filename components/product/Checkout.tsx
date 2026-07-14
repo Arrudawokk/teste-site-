@@ -18,6 +18,7 @@ import { siteConfig } from "@/lib/site";
 
 type PaymentMethod = "card" | "pix";
 type SubmissionStatus = "pending" | "in_process" | "approved" | "rejected" | "cancelled" | "refunded" | "charged_back";
+type CardSdkStatus = "unavailable" | "loading" | "ready" | "error";
 
 const mercadoPagoPublicKey = process.env.NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY;
 const POLL_INTERVAL_MS = 4000;
@@ -52,6 +53,7 @@ export function Checkout({ product }: { product: Product }) {
   const [pixCopied, setPixCopied] = useState(false);
   const [pollingExpired, setPollingExpired] = useState(false);
   const [pollingRun, setPollingRun] = useState(0);
+  const [cardSdkStatus, setCardSdkStatus] = useState<CardSdkStatus>(mercadoPagoPublicKey ? "loading" : "unavailable");
   const mercadoPagoRef = useRef<InstanceType<NonNullable<Window["MercadoPago"]>> | null>(null);
   const purchaseTrackedRef = useRef(false);
   const idempotencyKeyRef = useRef<string | null>(null);
@@ -152,8 +154,18 @@ export function Checkout({ product }: { product: Product }) {
   }, [status, purchaseEventId, product, productCategory]);
 
   function handleMercadoPagoLoaded() {
-    if (!mercadoPagoPublicKey || !window.MercadoPago) return;
-    mercadoPagoRef.current = new window.MercadoPago(mercadoPagoPublicKey, { locale: "pt-BR" });
+    if (!mercadoPagoPublicKey || !window.MercadoPago) {
+      setCardSdkStatus(mercadoPagoPublicKey ? "error" : "unavailable");
+      return;
+    }
+
+    try {
+      mercadoPagoRef.current = new window.MercadoPago(mercadoPagoPublicKey, { locale: "pt-BR" });
+      setCardSdkStatus("ready");
+    } catch {
+      mercadoPagoRef.current = null;
+      setCardSdkStatus("error");
+    }
   }
 
   async function copyPixCode() {
@@ -187,10 +199,16 @@ export function Checkout({ product }: { product: Product }) {
         if (!mp) throw new Error("Não foi possível carregar o Mercado Pago. Atualize a página e tente novamente.");
 
         const cardNumber = onlyDigits(String(formData.get("cardNumber") ?? ""));
-        const cardholderName = String(formData.get("cardName") ?? "");
+        const cardholderName = String(formData.get("cardName") ?? "").trim();
         const expiry = String(formData.get("cardExpiry") ?? "");
-        const securityCode = String(formData.get("cardCvv") ?? "");
+        const securityCode = onlyDigits(String(formData.get("cardCvv") ?? ""));
+        if (!/^\d{13,19}$/.test(cardNumber)) throw new Error("Confira o número do cartão informado.");
+        if (cardholderName.length < 2 || cardholderName.length > 120) throw new Error("Confira o nome impresso no cartão.");
+        if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) throw new Error("Informe a validade no formato MM/AA.");
+        if (!/^\d{3,4}$/.test(securityCode)) throw new Error("Confira o código de segurança do cartão.");
         const [expirationMonth, expirationYearShort] = expiry.split("/");
+        const expirationDate = new Date(2000 + Number(expirationYearShort), Number(expirationMonth), 0, 23, 59, 59);
+        if (expirationDate.getTime() < Date.now()) throw new Error("O cartão informado está vencido.");
 
         const paymentMethods = await mp.getPaymentMethods({ bin: cardNumber.slice(0, 6) });
         const paymentMethodId = paymentMethods.results[0]?.id;
@@ -357,7 +375,7 @@ export function Checkout({ product }: { product: Product }) {
 
   return (
     <main data-checkout className="relative min-h-screen overflow-hidden bg-[#070a10]">
-      {mercadoPagoPublicKey ? <Script src="https://sdk.mercadopago.com/js/v2" strategy="afterInteractive" onLoad={handleMercadoPagoLoaded} /> : null}
+      {mercadoPagoPublicKey ? <Script src="https://sdk.mercadopago.com/js/v2" strategy="afterInteractive" onReady={handleMercadoPagoLoaded} onError={() => { mercadoPagoRef.current = null; setCardSdkStatus("error"); }} /> : null}
       <ProductEventTracker event="InitiateCheckout" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency, category: productCategory }} />
       <div className="premium-grid pointer-events-none fixed inset-0 opacity-30" />
       <div className="pointer-events-none fixed -left-52 top-20 h-[520px] w-[520px] rounded-full bg-blue-600/[.08] blur-[150px]" />
@@ -387,8 +405,8 @@ export function Checkout({ product }: { product: Product }) {
             <section aria-labelledby="checkout-dados-title">
               <div className="mb-5 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#b8ff5c] text-sm font-black text-black">1</span><div><h2 id="checkout-dados-title" className="display-title text-2xl font-bold text-white">Seus dados</h2><p className="mt-0.5 text-xs text-zinc-500">O e-mail identifica sua compra e permite contato de suporte.</p></div></div>
               <div className="grid gap-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 shadow-[inset_0_1px_rgba(255,255,255,.025),0_24px_70px_rgba(0,0,0,.12)] md:grid-cols-2 md:p-6">
-                <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Nome completo</span><Input required name="name" autoComplete="name" placeholder="Como está no documento" /></label>
-                <label><span className="mb-2 block text-xs font-bold text-zinc-300">E-mail</span><Input required type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@email.com" /></label>
+                <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Nome completo</span><Input required name="name" autoComplete="name" minLength={2} maxLength={120} placeholder="Como está no documento" /></label>
+                <label><span className="mb-2 block text-xs font-bold text-zinc-300">E-mail</span><Input required type="email" name="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@email.com" /></label>
                 <label><span className="mb-2 block text-xs font-bold text-zinc-300">CPF</span><Input required name="document" inputMode="numeric" minLength={11} maxLength={14} placeholder="000.000.000-00" /></label>
               </div>
             </section>
@@ -397,15 +415,17 @@ export function Checkout({ product }: { product: Product }) {
               <div className="mb-5 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#b8ff5c] text-sm font-black text-black">2</span><div><h2 id="checkout-pagamento-title" className="display-title text-2xl font-bold text-white">Pagamento</h2><p className="mt-0.5 text-xs text-zinc-500">Escolha a opção mais conveniente para você.</p></div></div>
               <div className="grid grid-cols-2 gap-3" role="group" aria-label="Forma de pagamento">
                 <Button type="button" size="lg" variant={method === "pix" ? "primary" : "outline"} disabled={submitting} onClick={() => setMethod("pix")} aria-pressed={method === "pix"} className="h-16 rounded-2xl"><SiPix /> Pix</Button>
-                <Button type="button" size="lg" variant={method === "card" ? "primary" : "outline"} disabled={submitting} onClick={() => setMethod("card")} aria-pressed={method === "card"} className="h-16 rounded-2xl"><FiCreditCard /> Cartão</Button>
+                <Button type="button" size="lg" variant={method === "card" ? "primary" : "outline"} disabled={submitting || cardSdkStatus !== "ready"} onClick={() => setMethod("card")} aria-pressed={method === "card"} aria-describedby={cardSdkStatus === "error" || cardSdkStatus === "unavailable" ? "card-unavailable-message" : undefined} className="h-16 rounded-2xl"><FiCreditCard /> Cartão</Button>
               </div>
+
+              {cardSdkStatus === "error" || cardSdkStatus === "unavailable" ? <p id="card-unavailable-message" role="status" className="mt-3 text-xs leading-5 text-amber-200">Pagamento por cartão indisponível no momento. Você pode concluir a compra com Pix.</p> : null}
 
               {method === "card" ? (
                 <div className="mt-4 grid gap-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 shadow-[inset_0_1px_rgba(255,255,255,.025)] md:grid-cols-2 md:p-6">
-                  <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Número do cartão</span><Input required name="cardNumber" inputMode="numeric" autoComplete="cc-number" minLength={16} maxLength={19} placeholder="0000 0000 0000 0000" /></label>
+                  <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Número do cartão</span><Input required name="cardNumber" inputMode="numeric" autoComplete="cc-number" minLength={13} maxLength={23} pattern="[0-9 ]{13,23}" placeholder="0000 0000 0000 0000" /></label>
                   <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Nome no cartão</span><Input required name="cardName" autoComplete="cc-name" placeholder="NOME IMPRESSO NO CARTÃO" className="uppercase" /></label>
-                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">Validade</span><Input required name="cardExpiry" autoComplete="cc-exp" placeholder="MM/AA" minLength={5} maxLength={5} /></label>
-                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">CVV</span><Input required name="cardCvv" type="password" inputMode="numeric" autoComplete="cc-csc" minLength={3} maxLength={4} placeholder="•••" aria-label="Código de segurança do cartão" /></label>
+                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">Validade</span><Input required name="cardExpiry" inputMode="numeric" autoComplete="cc-exp" placeholder="MM/AA" minLength={5} maxLength={5} pattern="(0[1-9]|1[0-2])/[0-9]{2}" /></label>
+                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">CVV</span><Input required name="cardCvv" type="password" inputMode="numeric" autoComplete="cc-csc" minLength={3} maxLength={4} pattern="[0-9]{3,4}" placeholder="•••" aria-label="Código de segurança do cartão" /></label>
                 </div>
               ) : (
                 <div className="mt-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 sm:p-6">
