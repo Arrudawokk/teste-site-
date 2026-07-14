@@ -2,9 +2,9 @@
 
 **Projeto:** EscalaHub
 
-**Versão atual:** v1.0 RC3
+**Versão atual:** v1.0 RC4
 
-**Status:** pronta para homologação de analytics e produção
+**Status:** pronta para homologação da área do cliente, entrega e produção
 
 **Última atualização:** 13/07/2026
 
@@ -42,12 +42,20 @@ Construir uma plataforma própria, segura e escalável de venda de produtos digi
 - UTMs, `gclid` e `fbclid` preservados durante a sessão e associados aos eventos até a confirmação da compra.
 - Fila segura para eventos do Meta Pixel disparados antes do carregamento do script.
 - Eventos `Search` e `Lead` preparados sem gerar conversões artificiais em fluxos que ainda não os confirmam.
+- Área do cliente autenticada com sessão opaca, cookie HttpOnly e validação server-side.
+- Biblioteca automática baseada nas compras aprovadas do catálogo, sem conteúdo hardcoded.
+- Histórico de pedidos com produto, valor, status, data, gateway e forma de pagamento.
+- Perfil preparado para nome, e-mail, foto e configurações futuras.
+- Download autenticado que revalida sessão, titularidade, pagamento e acesso antes de buscar o arquivo privado.
+- Abstração de arquivos privados preparada para adaptadores de Vercel Blob, S3 ou Cloudflare R2.
+- Camada de e-mails transacionais desacoplada do provedor com templates de aprovação, pendência, reembolso e entrega.
+- Estados vazios, loading, erro e recuperação de acesso pelo código do pedido aprovado.
 
 ## Ativação operacional obrigatória
 
 Antes de aceitar vendas reais no domínio final:
 
-1. Provisionar PostgreSQL com pooler e executar `db/migrations/001_payment_orders.sql`.
+1. Provisionar PostgreSQL com pooler e executar, em ordem, `db/migrations/001_payment_orders.sql` e `db/migrations/002_customer_accounts.sql`.
 2. Configurar `DATABASE_URL` e todas as credenciais reais do Mercado Pago.
 3. Armazenar o produto em origem privada e configurar as variáveis de entrega descritas em `.env.example`.
 4. Gerar `DELIVERY_TOKEN_SECRET` com no mínimo 32 caracteres aleatórios.
@@ -55,10 +63,10 @@ Antes de aceitar vendas reais no domínio final:
 6. Configurar consentimento e revisar juridicamente a ativação de tags de marketing.
 7. Escolher uma única rota de envio ao GA4: integração direta ou tags do GTM, nunca ambas para a mesma propriedade.
 8. Validar todos os eventos no Meta Test Events, GA4 DebugView e modo Preview do GTM no domínio definitivo.
+9. Homologar criação, retomada e encerramento de sessão, biblioteca e download autenticado em produção.
 
 ## Prioridades P0 restantes da aplicação
 
-- Proteger o dashboard com autenticação e autorização antes de conectar dados reais.
 - Executar a homologação operacional acima no domínio definitivo.
 - Validar backup, restauração e alertas do banco de produção.
 
@@ -66,8 +74,8 @@ Antes de aceitar vendas reais no domínio final:
 
 - Rate limiting distribuído/WAF nos endpoints de pagamento.
 - Monitoramento e alertas para falhas de webhook, banco, gateway e entrega.
-- E-mail transacional como canal adicional de recuperação do acesso.
-- Área do cliente com histórico de pedidos e novo download autenticado.
+- Conectar um provedor real à camada de e-mails transacionais e processar envios com fila persistente.
+- Adicionar rate limiting ao formulário de recuperação da conta.
 - Meta Conversions API e Google Enhanced Conversions server-side.
 - Testes E2E automatizados no ambiente sandbox do Mercado Pago.
 
@@ -98,4 +106,12 @@ Antes de aceitar vendas reais no domínio final:
 - SEO técnico, imagens, fontes, hidratação e fronteiras entre Server e Client Components revisados sem regressões.
 - `npm install`, `npm run lint`, `npm run type-check` e `npm run build`: aprovados na RC3.
 
-Consulte `docs/RC3_ANALYTICS.md`, `docs/RC3_REPORT.md`, `docs/RC2_REPORT.md` e `docs/MERCADO_PAGO.md` para a configuração, o fluxo completo e os riscos operacionais restantes.
+## Qualidade da RC4
+
+- Dashboard demonstrativo público removido do fluxo e redirecionado para a área autenticada.
+- Dados da conta são carregados apenas no servidor e filtrados pela identidade da sessão.
+- Acesso e download são revogados automaticamente quando o pedido deixa de estar aprovado.
+- Migração aditiva preserva os pedidos existentes e adiciona contas e sessões sem alterar o fluxo do gateway.
+- Validação final registrada em `docs/RC4_REPORT.md`.
+
+Consulte `docs/ACCOUNT.md`, `docs/RC4_REPORT.md`, `docs/RC3_ANALYTICS.md`, `docs/RC3_REPORT.md`, `docs/RC2_REPORT.md` e `docs/MERCADO_PAGO.md` para a configuração, os fluxos completos e os riscos operacionais restantes.
