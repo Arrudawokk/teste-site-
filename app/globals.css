@@ -154,6 +154,9 @@ button:disabled { cursor: not-allowed; }
 @keyframes book-float { 0%,100% { transform: translateY(0) rotate(-.5deg); } 50% { transform: translateY(-14px) rotate(.5deg); } }
 @keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 @keyframes control-spinner { to { transform: rotate(360deg); } }
+@keyframes mobile-menu-enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+.mobile-menu-enter { animation: mobile-menu-enter .22s var(--ease-premium) both; }
 
 @media (hover: hover) and (pointer: fine) {
   .interactive-card:hover { transform: translateY(-4px) scale(1.003); border-color: rgba(124,167,255,.22); box-shadow: var(--shadow-card-hover); }

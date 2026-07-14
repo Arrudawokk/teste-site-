@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import { FiArrowUpRight, FiMenu, FiX } from "react-icons/fi";
 import { Button } from "@/components/ui/Button";
 
@@ -114,15 +113,10 @@ export function Header({ productHref, ctaLabel = "Ver o guia", conversionMode = 
         </div>
       </div>
 
-      <AnimatePresence initial={false}>
-        {!conversionMode && isMenuOpen && (
-          <motion.div
+      {!conversionMode && isMenuOpen ? (
+          <div
             id="mobile-navigation"
-            className="overflow-hidden border-t border-white/[.07] bg-[#06080d]/96 md:hidden"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="mobile-menu-enter overflow-hidden border-t border-white/[.07] bg-[#06080d]/96 md:hidden"
           >
             <nav className="container-default flex flex-col gap-1 py-4" aria-label="Navegação mobile">
           <Link className="rounded-xl px-4 py-3 text-sm font-semibold text-zinc-200 transition-colors hover:bg-white/[.065] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8cb8ff]" href="/#produto" onClick={closeMenu}>Produto</Link>
@@ -139,9 +133,8 @@ export function Header({ productHref, ctaLabel = "Ver o guia", conversionMode = 
             </Button>
           </div>
             </nav>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        ) : null}
     </header>
   );
 }
