@@ -2,7 +2,7 @@
 
 ## GitHub
 
-O repositório oficial é `Arrudawokk/escalahub`. O fluxo recomendado é trabalhar em branch, executar as validações e integrar na `main` somente com build aprovado.
+O repositório oficial é `Arrudawokk/teste-site-`. O fluxo recomendado é trabalhar em branch, executar as validações e integrar na `main` somente com build aprovado.
 
 ```bash
 git checkout -b nome-da-alteracao
@@ -26,9 +26,12 @@ Nunca versionar `.env.local`, tokens, chaves ou credenciais.
 
 ## Variáveis de ambiente
 
-Obrigatória em produção:
+Obrigatórias em produção:
 
 - `NEXT_PUBLIC_SITE_URL`: URL canônica, com HTTPS e sem barra final.
+- `NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY`: chave pública usada pelo Mercado Pago.js no navegador.
+- `MERCADO_PAGO_ACCESS_TOKEN`: credencial privada usada somente no servidor.
+- `MERCADO_PAGO_WEBHOOK_SECRET`: segredo privado para validar notificações.
 
 Opcionais, apenas com IDs reais:
 
@@ -37,6 +40,8 @@ Opcionais, apenas com IDs reais:
 - `NEXT_PUBLIC_META_PIXEL_ID`: Pixel ID da Meta.
 
 Use `.env.example` como referência. A ausência de um ID mantém a integração correspondente desativada.
+
+As três credenciais do Mercado Pago devem pertencer ao mesmo ambiente. O checkout recusa criar cobranças quando a URL pública não está configurada com HTTPS.
 
 ## Analytics e Pixel
 
@@ -54,5 +59,7 @@ Não dispare `Purchase` por clique, envio de formulário ou página de agradecim
 - validar canonical, Open Graph, Twitter Card e JSON-LD;
 - validar checkout com e sem `?product=slug`;
 - conferir eventos nas ferramentas de depuração do GA4, GTM e Meta;
+- confirmar que tags não essenciais só serão ativadas depois da implementação do consentimento aplicável;
 - confirmar headers de segurança e HTTPS;
+- homologar assinatura, reenvio e reconciliação do webhook em Preview;
 - executar uma compra real somente depois da integração de pagamento homologada.

@@ -37,8 +37,11 @@ checkout e nenhuma outra parte da aplicação precisa mudar.
    no navegador usando a chave pública (`NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY`)
    e o backend recebe apenas o token de uso único, a bandeira detectada e o
    número de parcelas.
-4. A rota `POST /api/payments/create` chama `gateway.createPayment(...)` e
-   registra o pedido em `OrderStore` com o status retornado.
+4. A rota `POST /api/payments/create` registra primeiro o pedido pendente e
+   depois chama `gateway.createPayment(...)`. Isso elimina a janela em que um
+   webhook poderia chegar antes da existência do pedido. O identificador de
+   idempotência gerado no navegador é reutilizado em tentativas após falhas de
+   rede e também é enviado ao Mercado Pago.
 5. `POST /api/payments/webhook` recebe as notificações do Mercado Pago,
    valida a assinatura (`WebhookSignatureValidator` do SDK oficial) e, em
    caso de sucesso, **busca o pagamento novamente na API do Mercado Pago**
@@ -46,9 +49,9 @@ checkout e nenhuma outra parte da aplicação precisa mudar.
    usado como fonte de verdade.
 6. `GET /api/payments/status?orderId=...` permite que o checkout consulte o
    status atualizado (usado no polling do Pix e de cartões em processamento).
-7. Quando o status chega a `approved`, o evento `Purchase` é disparado
-   (`lib/analytics.ts`, já existente) com o valor real e o identificador do
-   pagamento como `transactionId`.
+7. Quando o status autoritativo chega a `approved`, o evento `Purchase` é
+   disparado no navegador com a referência externa como `transactionId` e
+   `eventID`, preparando deduplicação futura com eventos server-side.
 
 ## Segurança
 
@@ -60,14 +63,18 @@ checkout e nenhuma outra parte da aplicação precisa mudar.
   cartão sem tokenização.
 - Toda notificação de webhook tem a assinatura validada
   (`x-signature` / `x-request-id`) antes de qualquer efeito colateral.
+- A assinatura precisa estar dentro de uma janela de cinco minutos; estados
+  terminais não podem regredir em reenvios do mesmo evento.
 - A confirmação de pagamento nunca é aceita a partir do que o navegador
   envia — o status final vem sempre de uma consulta servidor-a-servidor ao
   Mercado Pago.
+- Referência externa, ID do pagamento, método, valor, moeda e e-mail são
+  reconciliados com o pedido antes de qualquer atualização.
 - O preço cobrado é sempre lido do catálogo (`lib/catalog`) no servidor,
   nunca do payload enviado pelo cliente.
-- A criação de pagamento usa uma chave de idempotência determinística
-  (`escalahub-<externalReference>`) para evitar cobranças duplicadas em
-  reenvios.
+- A criação usa uma chave de idempotência estável por tentativa de compra
+  (`escalahub-<externalReference>`), preservada pelo cliente em falhas de rede,
+  para impedir cobranças duplicadas em reenvios.
 
 ## Variáveis de ambiente
 
@@ -76,6 +83,7 @@ checkout e nenhuma outra parte da aplicação precisa mudar.
 | `MERCADO_PAGO_ACCESS_TOKEN` | Servidor | Nunca expor ao cliente. |
 | `MERCADO_PAGO_WEBHOOK_SECRET` | Servidor | Usado para validar a assinatura do webhook. |
 | `NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY` | Cliente | É a chave **pública** do Mercado Pago — segura para expor; usada apenas para tokenizar o cartão no navegador. |
+| `NEXT_PUBLIC_SITE_URL` | Servidor e cliente | URL HTTPS canônica usada para construir o webhook e os metadados. |
 
 > **Decisão técnica:** o prompt original sugeria também uma variável
 > `NEXT_PUBLIC_APP_URL`. O projeto já possui `NEXT_PUBLIC_SITE_URL`
@@ -83,18 +91,20 @@ checkout e nenhuma outra parte da aplicação precisa mudar.
 > do webhook (`notification_url`) reutiliza essa fonte única de verdade em
 > vez de duplicar a mesma informação em duas variáveis.
 
-## Limitações conhecidas e próximos passos (P1)
+## Limitações conhecidas e bloqueios de produção
 
-- **Persistência de pedidos**: `OrderStore` usa uma implementação em
+- **P0 — persistência de pedidos**: `OrderStore` usa uma implementação em
   memória (`orderStore.ts`), suficiente para uma única instância Node.js de
   longa duração. Em uma implantação serverless com múltiplas instâncias, a
   interface `OrderStore` deve ganhar uma implementação sobre um banco de
   dados real — nenhuma rota de API precisa mudar quando isso acontecer.
-- **Liberação e entrega do produto**: o webhook já identifica com segurança
+- **P0 — liberação e entrega do produto**: o webhook já identifica com segurança
   quando um pagamento foi aprovado; falta conectar esse evento a um fluxo de
   liberação (e-mail transacional, geração de link de download protegido).
   Esse é o próximo item do roadmap (`PROJECT_STATUS.md`, prioridade P1).
-- **Conversions API server-side do Meta**: o Pixel client-side já dispara
+- **P1 — proteção contra abuso**: o endpoint de criação ainda precisa de rate
+  limiting distribuído e observabilidade antes de receber tráfego em escala.
+- **P1 — Conversions API server-side do Meta**: o Pixel client-side já dispara
   `Purchase` na aprovação do pagamento. Uma camada de eventos server-side
   (Conversions API) pode ser adicionada futuramente no handler do webhook,
   reaproveitando os dados já normalizados em `WebhookNotification`.

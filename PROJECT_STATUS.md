@@ -55,7 +55,11 @@ A plataforma deve ser escalável, segura e preparada para suportar centenas de p
 
 # Próxima prioridade (P0)
 
-Nenhuma pendência de gateway de pagamento. Ver `docs/MERCADO_PAGO.md` para o fluxo completo e limitações conhecidas.
+- Persistir pedidos em banco transacional antes de executar em múltiplas instâncias.
+- Conectar a aprovação do pagamento à entrega idempotente do produto.
+- Proteger o dashboard antes de conectar dados reais.
+
+Ver `docs/MERCADO_PAGO.md` e `docs/RC1_AUDIT.md` para o fluxo completo e os bloqueios de produção.
 
 ---
 
@@ -115,9 +119,9 @@ lib/payments/
 
 # Bugs conhecidos
 
-Nenhum bug crítico registrado.
+Nenhum erro crítico de compilação registrado. O build deixou de depender do Google Fonts e foi validado com sucesso em 13 de julho de 2026.
 
-`npm run build` não pôde ser validado neste ambiente de desenvolvimento por falta de acesso de rede a `fonts.googleapis.com` (usado pelo `next/font/google`, já existente antes da integração de pagamentos). `lint` e `type-check` passam sem erros; recomenda-se validar o build completo em um ambiente com acesso normal à internet antes do deploy.
+Os bloqueios operacionais da RC1 estão documentados em `docs/RC1_AUDIT.md` e impedem a aprovação para tráfego pago até serem resolvidos.
 
 ---
 

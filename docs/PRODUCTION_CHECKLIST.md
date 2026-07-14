@@ -48,16 +48,17 @@ A camada front-end está estável, responsiva e compilando sem erros. A liberaç
 - [ ] `https://escalahub.com` responde, mas atualmente publica outra aplicação: “EscalaHub - Gestão de escalas, plantões e turnos”. O domínio deve ser apontado para este projeto e toda a auditoria externa deve ser repetida.
 - [x] O checkout agora integra o Mercado Pago (Pix e cartão) via `lib/payments/`, com criação de pagamento e webhook implementados. Ver `docs/MERCADO_PAGO.md`.
 - [x] Cartão e CPF: número, validade e CVV são tokenizados no navegador pelo Mercado Pago.js e nunca chegam ao backend; apenas o CPF (documento de identificação, não sensível para PCI) é enviado ao servidor.
-- [x] `trackPurchase` agora é chamado quando o webhook confirma `approved` após reconsulta server-to-server ao Mercado Pago (idempotente por `externalReference`).
+- [x] `trackPurchase` é chamado somente após o status autoritativo `approved`; usa `externalReference` como `transactionId` e `eventID` para deduplicação futura.
+- [ ] Pedidos ainda usam memória local. Banco transacional é obrigatório antes de produção com múltiplas instâncias.
+- [ ] A entrega automática/download protegido ainda não está conectado à aprovação.
 - [ ] O dashboard não possui autenticação nem autorização. Ele só pode receber dados reais depois de login e RBAC.
-- [ ] Não existem páginas de Política de Privacidade, Termos de Uso e política de reembolso. Elas não foram criadas porque esta sprint proíbe novas páginas.
+- [x] Privacidade, Termos, Cookies e LGPD existem; os textos ainda exigem revisão jurídica antes da operação comercial.
 
 ### P1 — necessários antes de escalar campanhas
 
 - [ ] Preencher e validar IDs reais de GA4, GTM e Meta Pixel no ambiente publicado.
 - [ ] Evitar duplicidade de GA4/Meta quando as mesmas tags forem configuradas dentro do GTM.
 - [ ] Implementar consentimento compatível com LGPD antes de ativar tags não essenciais.
-- [ ] Conectar o formulário de newsletter a um serviço real ou removê-lo da versão comercial.
 - [ ] Validar a existência e o atendimento de `contato@escalahub.com`.
 - [ ] Instalar monitoramento de erros, logs estruturados e Real User Monitoring.
 - [ ] Executar Lighthouse e Core Web Vitals no domínio correto após o deploy.
