@@ -54,7 +54,7 @@
 - Canonical, Open Graph, Twitter Cards, JSON-LD, robots, sitemap e manifest publicados com a URL operacional.
 - O deployment V1 do commit `179cfd1` concluiu com status `success` no projeto `teste-site-qnxk`.
 - Após o deploy, Home, produto, checkout, conta, blog, robots, sitemap e manifest foram revalidados no alias operacional; a rota inexistente continuou retornando 404.
-- O projeto duplicado `teste-site` não iniciou um novo deployment para esse commit. A configuração histórica continua documentada para revisão segura, sem remoção automática.
+- O projeto duplicado `teste-site` também concluiu um deployment com status `success` após atraso no registro. A duplicação continua documentada para revisão segura, sem remoção automática.
 
 ## Fluxo de compra auditado
 
