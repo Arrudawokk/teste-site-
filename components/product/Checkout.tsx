@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ProductEventTracker } from "@/components/analytics/ProductEventTracker";
 import { trackPurchase } from "@/lib/analytics";
-import { formatProductPrice, getProductPath, type Product } from "@/lib/catalog";
+import { formatProductPrice, getCategoryBySlug, getProductPath, type Product } from "@/lib/catalog";
 import type { DeliveryDetails, PixPaymentDetails } from "@/lib/payments/types";
 import { onlyDigits } from "@/lib/payments/utils";
 import { siteConfig } from "@/lib/site";
@@ -58,6 +58,7 @@ export function Checkout({ product }: { product: Product }) {
   const errorRef = useRef<HTMLDivElement | null>(null);
   const formattedPrice = formatProductPrice(product);
   const productHref = getProductPath(product);
+  const productCategory = getCategoryBySlug(product.category)?.name ?? product.category;
   const trustSignals = [
     { icon: FiShield, title: "Compra protegida", text: `Garantia de ${product.guaranteeDays} dias` },
     { icon: FiLock, title: "Dados protegidos", text: "Conexão segura" },
@@ -144,11 +145,11 @@ export function Checkout({ product }: { product: Product }) {
     if (status === "approved" && !purchaseTrackedRef.current && purchaseEventId) {
       purchaseTrackedRef.current = true;
       trackPurchase(
-        { slug: product.slug, title: product.title, price: product.price, currency: product.currency },
+        { slug: product.slug, title: product.title, price: product.price, currency: product.currency, category: productCategory },
         { transactionId: purchaseEventId, value: product.price },
       );
     }
-  }, [status, purchaseEventId, product]);
+  }, [status, purchaseEventId, product, productCategory]);
 
   function handleMercadoPagoLoaded() {
     if (!mercadoPagoPublicKey || !window.MercadoPago) return;
@@ -356,7 +357,7 @@ export function Checkout({ product }: { product: Product }) {
   return (
     <main data-checkout className="relative min-h-screen overflow-hidden bg-[#070a10]">
       {mercadoPagoPublicKey ? <Script src="https://sdk.mercadopago.com/js/v2" strategy="afterInteractive" onLoad={handleMercadoPagoLoaded} /> : null}
-      <ProductEventTracker event="InitiateCheckout" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency }} />
+      <ProductEventTracker event="InitiateCheckout" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency, category: productCategory }} />
       <div className="premium-grid pointer-events-none fixed inset-0 opacity-30" />
       <div className="pointer-events-none fixed -left-52 top-20 h-[520px] w-[520px] rounded-full bg-blue-600/[.08] blur-[150px]" />
       <div className="pointer-events-none fixed -right-52 bottom-0 h-[500px] w-[500px] rounded-full bg-violet-600/[.07] blur-[150px]" />

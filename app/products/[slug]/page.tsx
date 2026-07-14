@@ -82,7 +82,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
         <ProductContent product={product} />
       </main>
       <Footer />
-      <ProductEventTracker event="ViewContent" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency }} />
+      <ProductEventTracker event="ViewContent" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency, category: category?.name ?? product.category }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(productSchema).replace(/</g, "\\u003c") }} />
     </>
   );
