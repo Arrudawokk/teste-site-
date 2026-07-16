@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { AccountStoreUnavailableError } from "@/lib/account/store";
+import { issueCustomerSession } from "@/lib/account/session";
 import { getProductBySlug } from "@/lib/catalog";
 import { getDeliveryDetails } from "@/lib/payments/delivery";
 import { getPaymentGateway } from "@/lib/payments/gateway";
@@ -7,10 +9,8 @@ import { PaymentGatewayError } from "@/lib/payments/interfaces";
 import { getOrderStore, OrderStoreUnavailableError, type OrderRecord } from "@/lib/payments/orderStore";
 import { reconcilePayment } from "@/lib/payments/reconciliation";
 import type { CreatePaymentInput, PaymentResult } from "@/lib/payments/types";
-import { isValidCpf, isValidEmail, onlyDigits, splitFullName } from "@/lib/payments/utils";
+import { isValidEmail, splitFullName } from "@/lib/payments/utils";
 import { logger } from "@/lib/server/logger";
-import { issueCustomerSession } from "@/lib/account/session";
-import { AccountStoreUnavailableError } from "@/lib/account/store";
 import { hasDeploymentSiteUrl, SITE_URL } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -21,9 +21,7 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 type CreatePaymentBody = {
   productSlug?: string;
-  method?: "pix" | "card";
-  payer?: { name?: string; email?: string; document?: string };
-  card?: { token?: string; paymentMethodId?: string; installments?: number };
+  payer?: { name?: string; email?: string };
 };
 
 function json(body: object, status: number) {
@@ -39,6 +37,15 @@ function isAllowedOrigin(request: Request): boolean {
   if (!origin) return process.env.NODE_ENV !== "production";
 
   const allowedOrigins = new Set([new URL(request.url).origin]);
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host")?.trim();
+  if (host) {
+    const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol = forwardedProtocol || new URL(request.url).protocol.replace(":", "");
+    if (protocol === "https" || (process.env.NODE_ENV !== "production" && protocol === "http")) {
+      allowedOrigins.add(`${protocol}://${host}`);
+    }
+  }
   const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (configuredSiteUrl) {
     try {
@@ -50,18 +57,37 @@ function isAllowedOrigin(request: Request): boolean {
   return allowedOrigins.has(origin);
 }
 
-function getNotificationUrl(): string | null {
+function checkoutUrls(productSlug: string, orderId: string): { successUrl: string; cancelUrl: string } | null {
   if (!hasDeploymentSiteUrl) return null;
-
   try {
-    return new URL("/api/payments/webhook", SITE_URL).toString();
+    const successUrl = new URL("/checkout", SITE_URL);
+    successUrl.searchParams.set("product", productSlug);
+    successUrl.searchParams.set("orderId", orderId);
+    successUrl.searchParams.set("stripe", "success");
+    // A Stripe substitui este marcador literal depois de concluir a sessão.
+    successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+
+    const cancelUrl = new URL("/checkout", SITE_URL);
+    cancelUrl.searchParams.set("product", productSlug);
+    cancelUrl.searchParams.set("orderId", orderId);
+    cancelUrl.searchParams.set("stripe", "cancelled");
+
+    return {
+      successUrl: successUrl.toString().replace("%7BCHECKOUT_SESSION_ID%7D", "{CHECKOUT_SESSION_ID}"),
+      cancelUrl: cancelUrl.toString(),
+    };
   } catch {
     return null;
   }
 }
 
-function isSameOrder(order: OrderRecord, productSlug: string, method: "pix" | "card", email: string): boolean {
-  return order.productSlug === productSlug && order.method === method && order.payerEmail.toLowerCase() === email.toLowerCase();
+function isSameOrder(order: OrderRecord, productSlug: string, email: string): boolean {
+  return (
+    order.productSlug === productSlug &&
+    order.gateway === "stripe" &&
+    order.method === "stripe_checkout" &&
+    order.payerEmail.toLowerCase() === email.toLowerCase()
+  );
 }
 
 async function paymentResponse(result: PaymentResult, order: OrderRecord, status = 201) {
@@ -77,7 +103,7 @@ async function paymentResponse(result: PaymentResult, order: OrderRecord, status
     {
       orderId: order.externalReference,
       status: order.status,
-      pix: result.pix,
+      checkoutUrl: result.checkoutUrl,
       delivery: getDeliveryDetails(order),
       purchaseEventId: order.status === "approved" ? order.externalReference : undefined,
       accountUrl: order.status === "approved" ? "/account" : undefined,
@@ -106,44 +132,29 @@ export async function POST(request: Request) {
   const productSlug = body.productSlug;
   const product = productSlug ? getProductBySlug(productSlug) : undefined;
   if (!product) return badRequest("Produto não encontrado no catálogo.");
-  if (body.method !== "pix" && body.method !== "card") return badRequest("Forma de pagamento inválida.");
 
   const name = body.payer?.name?.trim();
   const email = body.payer?.email?.trim().toLowerCase();
-  const document = body.payer?.document ? onlyDigits(body.payer.document) : "";
   if (!name || name.length < 2 || name.length > 120) return badRequest("Nome inválido.");
   if (!email || email.length > 254 || !isValidEmail(email)) return badRequest("E-mail inválido.");
-  if (!isValidCpf(document)) return badRequest("CPF inválido.");
 
   const clientIdempotencyKey = request.headers.get("x-idempotency-key")?.trim();
   if (clientIdempotencyKey && !UUID_V4_PATTERN.test(clientIdempotencyKey)) return badRequest("Chave de idempotência inválida.");
 
-  const notificationUrl = getNotificationUrl();
-  if (!notificationUrl) return json({ error: "Checkout temporariamente indisponível." }, 503);
+  const externalReference = clientIdempotencyKey ?? randomUUID();
+  const urls = checkoutUrls(product.slug, externalReference);
+  if (!urls) return json({ error: "Checkout temporariamente indisponível." }, 503);
 
   const { firstName, lastName } = splitFullName(name);
-  const externalReference = clientIdempotencyKey ?? randomUUID();
-  const basePayload = {
+  const input: CreatePaymentInput = {
     productSlug: product.slug,
     amount: product.price,
     currency: product.currency,
-    payer: { email, firstName, lastName, documentNumber: document },
+    payer: { email, firstName, lastName },
     externalReference,
-    notificationUrl,
+    method: "stripe_checkout",
+    ...urls,
   };
-
-  let input: CreatePaymentInput;
-  if (body.method === "pix") {
-    input = { ...basePayload, method: "pix" };
-  } else {
-    const cardToken = body.card?.token?.trim();
-    const paymentMethodId = body.card?.paymentMethodId?.trim();
-    const installments = body.card?.installments ?? 1;
-    if (!cardToken || cardToken.length > 256 || !paymentMethodId || !/^[a-z0-9_-]{1,50}$/i.test(paymentMethodId) || installments !== 1) {
-      return badRequest("Dados do cartão inválidos.");
-    }
-    input = { ...basePayload, method: "card", cardToken, paymentMethodId, installments };
-  }
 
   try {
     const orderStore = getOrderStore();
@@ -155,8 +166,8 @@ export async function POST(request: Request) {
       currency: product.currency,
       payerEmail: email,
       payerName: name,
-      gateway: "mercado_pago",
-      method: body.method,
+      gateway: "stripe",
+      method: "stripe_checkout",
       status: "pending",
       accessStatus: "pending",
       createdAt: now,
@@ -166,7 +177,7 @@ export async function POST(request: Request) {
 
     if (!created) {
       const existing = await orderStore.getByExternalReference(externalReference);
-      if (!existing || !isSameOrder(existing, product.slug, body.method, email)) {
+      if (!existing || !isSameOrder(existing, product.slug, email)) {
         return json({ error: "A chave de idempotência já foi utilizada em outro pedido." }, 409);
       }
       if (existing.gatewayPaymentId) {
@@ -190,9 +201,9 @@ export async function POST(request: Request) {
     }
     if (error instanceof PaymentGatewayError) {
       logger.warn("payment.gateway_unavailable", { orderId: externalReference });
-      return json({ error: "Não foi possível processar o pagamento. Tente novamente." }, 502);
+      return json({ error: "Não foi possível iniciar o pagamento. Tente novamente." }, 502);
     }
     logger.error("payment.create_failed", { orderId: externalReference });
-    return json({ error: "Não foi possível processar o pagamento." }, 500);
+    return json({ error: "Não foi possível iniciar o pagamento." }, 500);
   }
 }

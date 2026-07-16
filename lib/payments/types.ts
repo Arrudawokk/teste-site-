@@ -1,16 +1,9 @@
 /**
- * Tipos de domínio da camada de pagamentos.
- *
- * Nenhum tipo deste arquivo depende do SDK do Mercado Pago (ou de qualquer
- * outro gateway). É isso que permite trocar de gateway no futuro (Stripe,
- * Asaas, etc.) sem alterar o restante da aplicação.
+ * Tipos de domínio da camada de pagamentos, independentes do SDK do gateway.
  */
 
-export type PaymentMethodType = "pix" | "card";
+export type PaymentMethodType = "pix" | "card" | "stripe_checkout";
 
-/**
- * Status normalizado do pagamento, independente do gateway utilizado.
- */
 export type PaymentStatus =
   | "pending"
   | "in_process"
@@ -30,38 +23,18 @@ export type Payer = {
   email: string;
   firstName: string;
   lastName: string;
-  /** CPF apenas com dígitos. */
-  documentNumber: string;
 };
 
-export type BasePaymentInput = {
+export type CreatePaymentInput = {
   productSlug: string;
   amount: number;
   currency: "BRL";
   payer: Payer;
   /** Identificador único gerado pela aplicação para reconciliar o pedido. */
   externalReference: string;
-  notificationUrl: string;
-};
-
-export type CreatePixPaymentInput = BasePaymentInput & {
-  method: "pix";
-};
-
-export type CreateCardPaymentInput = BasePaymentInput & {
-  method: "card";
-  /** Token de cartão gerado no navegador (nunca trafega PAN/CVV pelo backend). */
-  cardToken: string;
-  paymentMethodId: string;
-  installments: number;
-};
-
-export type CreatePaymentInput = CreatePixPaymentInput | CreateCardPaymentInput;
-
-export type PixPaymentDetails = {
-  qrCode: string;
-  qrCodeBase64: string;
-  ticketUrl?: string;
+  method: "stripe_checkout";
+  successUrl: string;
+  cancelUrl: string;
 };
 
 export type PaymentResult = {
@@ -73,20 +46,12 @@ export type PaymentResult = {
   amount: number;
   currency: string;
   payerEmail?: string;
-  pix?: PixPaymentDetails;
+  /** URL temporária da página de pagamento hospedada pelo gateway. */
+  checkoutUrl?: string;
 };
 
-/**
- * Notificação normalizada de webhook, já validada e resolvida contra o
- * gateway (nunca derivada apenas do payload recebido).
- */
-export type WebhookNotification = {
-  gatewayPaymentId: string;
-  status: PaymentStatus;
-  statusDetail?: string;
-  externalReference: string;
-  method: PaymentMethodType;
-  amount: number;
-  currency: string;
-  payerEmail?: string;
+/** Notificação normalizada após validação e consulta autoritativa ao gateway. */
+export type WebhookNotification = PaymentResult & {
+  /** Identificador imutável do evento no gateway, usado para idempotência. */
+  eventId: string;
 };

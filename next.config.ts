@@ -8,12 +8,12 @@ const contentSecurityPolicy = `
   form-action 'self' mailto:;
   frame-ancestors 'none';
   object-src 'none';
-  script-src 'self' 'unsafe-inline' ${isDevelopment ? "'unsafe-eval'" : ""} https://www.googletagmanager.com https://connect.facebook.net https://sdk.mercadopago.com https://www.mercadopago.com;
+  script-src 'self' 'unsafe-inline' ${isDevelopment ? "'unsafe-eval'" : ""} https://www.googletagmanager.com https://connect.facebook.net;
   style-src 'self' 'unsafe-inline';
-  img-src 'self' data: blob: https://www.facebook.com https://www.google-analytics.com https://www.googletagmanager.com https://http2.mlstatic.com https://www.mercadopago.com;
+  img-src 'self' data: blob: https://www.facebook.com https://www.google-analytics.com https://www.googletagmanager.com;
   font-src 'self' data:;
-  connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://connect.facebook.net https://www.facebook.com https://api.mercadopago.com https://events.mercadopago.com https://http2.mlstatic.com;
-  frame-src https://www.googletagmanager.com https://www.mercadopago.com;
+  connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://connect.facebook.net https://www.facebook.com;
+  frame-src https://www.googletagmanager.com;
   manifest-src 'self';
   ${isDevelopment ? "" : "upgrade-insecure-requests;"}
 `.replace(/\s{2,}/g, " ").trim();

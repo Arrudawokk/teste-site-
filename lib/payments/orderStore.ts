@@ -10,7 +10,7 @@ export type OrderRecord = {
   currency: string;
   payerEmail: string;
   payerName?: string;
-  gateway: "mercado_pago";
+  gateway: "mercado_pago" | "stripe";
   method: PaymentMethodType;
   status: PaymentStatus;
   accessStatus: ProductAccessStatus;
@@ -129,7 +129,7 @@ type OrderRow = {
   currency: string;
   payer_email: string;
   payer_name: string | null;
-  payment_gateway: "mercado_pago";
+  payment_gateway: "mercado_pago" | "stripe";
   payment_method: PaymentMethodType;
   payment_status: PaymentStatus;
   access_status: ProductAccessStatus;

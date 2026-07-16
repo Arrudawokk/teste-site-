@@ -1,4 +1,4 @@
-import { MercadoPagoGateway } from "./mercadoPago";
+import { StripeGateway } from "./stripe";
 import type { PaymentGateway } from "./interfaces";
 
 /**
@@ -13,7 +13,7 @@ let cachedGateway: PaymentGateway | null = null;
 
 export function getPaymentGateway(): PaymentGateway {
   if (!cachedGateway) {
-    cachedGateway = new MercadoPagoGateway();
+    cachedGateway = new StripeGateway();
   }
   return cachedGateway;
 }

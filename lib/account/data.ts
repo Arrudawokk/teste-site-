@@ -13,7 +13,7 @@ export type CustomerOrder = {
   status: OrderRecord["status"];
   accessStatus: OrderRecord["accessStatus"];
   method: OrderRecord["method"];
-  gateway: "Mercado Pago";
+  gateway: "Mercado Pago" | "Stripe";
   purchasedAt: string;
 };
 
@@ -82,7 +82,7 @@ function toCustomerOrder(order: OrderRecord): CustomerOrder {
     status: order.status,
     accessStatus: order.accessStatus,
     method: order.method,
-    gateway: "Mercado Pago",
+    gateway: order.gateway === "stripe" ? "Stripe" : "Mercado Pago",
     purchasedAt: order.createdAt,
   };
 }

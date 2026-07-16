@@ -16,9 +16,9 @@ function json(body: object, status: number, extraHeaders?: Record<string, string
   return NextResponse.json(body, { status, headers: { ...NO_STORE_HEADERS, ...extraHeaders } });
 }
 
-function webhookEventKey(gatewayId: string, requestId: string, notification: WebhookNotification): string {
+function webhookEventKey(gatewayId: string, notification: WebhookNotification): string {
   return createHash("sha256")
-    .update(`${gatewayId}|${requestId}|${notification.gatewayPaymentId}`)
+    .update(`${gatewayId}|${notification.eventId}`)
     .digest("hex");
 }
 
@@ -26,19 +26,17 @@ export async function POST(request: Request) {
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BODY_BYTES) return json({ error: "Requisição muito grande." }, 413);
 
-  const searchParams = new URL(request.url).searchParams;
-  const requestId = request.headers.get("x-request-id")?.trim();
-  const signature = request.headers.get("x-signature")?.trim();
-
   try {
-    if (!requestId || requestId.length > 256 || !signature || signature.length > 512) {
-      throw new InvalidWebhookRequestError("Cabeçalhos obrigatórios ausentes ou inválidos.");
+    const rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_WEBHOOK_BODY_BYTES) return json({ error: "Requisição muito grande." }, 413);
+    const signature = request.headers.get("stripe-signature")?.trim() ?? null;
+    if (!signature || signature.length > 2_048) {
+      throw new InvalidWebhookRequestError("Cabeçalho Stripe-Signature ausente ou inválido.");
     }
     const gateway = getPaymentGateway();
     const notification = await gateway.parseWebhook({
+      rawBody,
       signatureHeader: signature,
-      requestIdHeader: requestId,
-      searchParams,
     });
     if (!notification) return json({ received: true }, 200);
 
@@ -53,7 +51,7 @@ export async function POST(request: Request) {
       return json({ error: "Pagamento não corresponde ao pedido." }, 422);
     }
 
-    const eventKey = webhookEventKey(gateway.id, requestId, notification);
+    const eventKey = webhookEventKey(gateway.id, notification);
     const result = await reconcilePayment(orderStore, order, notification, eventKey);
     if (!result.order) return json({ error: "Não foi possível reconciliar o pagamento." }, 409);
 
