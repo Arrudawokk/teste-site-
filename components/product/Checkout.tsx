@@ -2,34 +2,28 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import Script from "next/script";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { FiAlertCircle, FiArrowLeft, FiCheck, FiCheckCircle, FiCopy, FiCreditCard, FiDownloadCloud, FiFileText, FiLock, FiMail, FiPackage, FiPlus, FiRefreshCw, FiShield } from "react-icons/fi";
-import { SiPix } from "react-icons/si";
+import { FiAlertCircle, FiArrowLeft, FiCheck, FiCheckCircle, FiCreditCard, FiDownloadCloud, FiFileText, FiLock, FiMail, FiPackage, FiPlus, FiRefreshCw, FiShield } from "react-icons/fi";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ProductEventTracker } from "@/components/analytics/ProductEventTracker";
 import { trackPurchase } from "@/lib/analytics";
 import { formatProductPrice, getCategoryBySlug, getProductPath, type Product } from "@/lib/catalog";
-import type { DeliveryDetails, PixPaymentDetails } from "@/lib/payments/types";
-import { onlyDigits } from "@/lib/payments/utils";
+import type { DeliveryDetails } from "@/lib/payments/types";
 import { siteConfig } from "@/lib/site";
 
-type PaymentMethod = "card" | "pix";
 type SubmissionStatus = "pending" | "in_process" | "approved" | "rejected" | "cancelled" | "refunded" | "charged_back";
-type CardSdkStatus = "unavailable" | "loading" | "ready" | "error";
 
-const mercadoPagoPublicKey = process.env.NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY;
 const POLL_INTERVAL_MS = 4000;
 const MAX_POLL_ATTEMPTS = 30;
 const ORDER_RECOVERY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type RecoverableOrder = { orderId: string; method: PaymentMethod; createdAt: number };
+type RecoverableOrder = { orderId: string; createdAt: number };
 
 function recoveryKey(productSlug: string): string {
-  return `escalahub:order:${productSlug}`;
+  return `escalahub:stripe-order:${productSlug}`;
 }
 
 const nextSteps = [
@@ -40,21 +34,16 @@ const nextSteps = [
 ];
 
 export function Checkout({ product }: { product: Product }) {
-  const [method, setMethod] = useState<PaymentMethod>("pix");
   const [complete, setComplete] = useState(false);
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [status, setStatus] = useState<SubmissionStatus>("pending");
-  const [pix, setPix] = useState<PixPaymentDetails | null>(null);
   const [delivery, setDelivery] = useState<DeliveryDetails | null>(null);
   const [purchaseEventId, setPurchaseEventId] = useState<string | null>(null);
-  const [pixCopied, setPixCopied] = useState(false);
   const [pollingExpired, setPollingExpired] = useState(false);
   const [pollingRun, setPollingRun] = useState(0);
-  const [cardSdkStatus, setCardSdkStatus] = useState<CardSdkStatus>(mercadoPagoPublicKey ? "loading" : "unavailable");
-  const mercadoPagoRef = useRef<InstanceType<NonNullable<Window["MercadoPago"]>> | null>(null);
   const purchaseTrackedRef = useRef(false);
   const idempotencyKeyRef = useRef<string | null>(null);
   const errorRef = useRef<HTMLDivElement | null>(null);
@@ -77,13 +66,13 @@ export function Checkout({ product }: { product: Product }) {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       try {
+        if (new URLSearchParams(window.location.search).has("stripe")) return;
         const stored = window.localStorage.getItem(recoveryKey(product.slug));
         if (!stored) return;
         const recovery = JSON.parse(stored) as Partial<RecoverableOrder>;
         if (
           !recovery.orderId ||
           !UUID_PATTERN.test(recovery.orderId) ||
-          (recovery.method !== "pix" && recovery.method !== "card") ||
           typeof recovery.createdAt !== "number" ||
           Date.now() - recovery.createdAt > ORDER_RECOVERY_MAX_AGE_MS
         ) {
@@ -91,12 +80,43 @@ export function Checkout({ product }: { product: Product }) {
           return;
         }
         setOrderId(recovery.orderId);
-        setMethod(recovery.method);
         setComplete(true);
         setStatus("pending");
       } catch {
         window.localStorage.removeItem(recoveryKey(product.slug));
       }
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [product.slug]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const stripeResult = params.get("stripe");
+      const returnedOrderId = params.get("orderId");
+      if (!stripeResult || !returnedOrderId || !UUID_PATTERN.test(returnedOrderId)) return;
+
+      if (stripeResult === "cancelled") {
+        try {
+          window.localStorage.removeItem(recoveryKey(product.slug));
+        } catch {
+          // O cancelamento continua válido sem armazenamento local.
+        }
+        idempotencyKeyRef.current = null;
+        setErrorMessage("Pagamento cancelado. Nenhuma cobrança foi confirmada e você pode tentar novamente.");
+      } else if (stripeResult === "success") {
+        setOrderId(returnedOrderId);
+        setComplete(true);
+        setStatus("pending");
+        try {
+          const recovery: RecoverableOrder = { orderId: returnedOrderId, createdAt: Date.now() };
+          window.localStorage.setItem(recoveryKey(product.slug), JSON.stringify(recovery));
+        } catch {
+          // O polling continua normalmente sem armazenamento local.
+        }
+      }
+
+      window.history.replaceState(null, "", `/checkout?product=${encodeURIComponent(product.slug)}`);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [product.slug]);
@@ -153,93 +173,29 @@ export function Checkout({ product }: { product: Product }) {
     }
   }, [status, purchaseEventId, product, productCategory]);
 
-  function handleMercadoPagoLoaded() {
-    if (!mercadoPagoPublicKey || !window.MercadoPago) {
-      setCardSdkStatus(mercadoPagoPublicKey ? "error" : "unavailable");
-      return;
-    }
-
-    try {
-      mercadoPagoRef.current = new window.MercadoPago(mercadoPagoPublicKey, { locale: "pt-BR" });
-      setCardSdkStatus("ready");
-    } catch {
-      mercadoPagoRef.current = null;
-      setCardSdkStatus("error");
-    }
-  }
-
-  async function copyPixCode() {
-    if (!pix) return;
-    try {
-      await navigator.clipboard.writeText(pix.qrCode);
-      setPixCopied(true);
-      setErrorMessage(null);
-      window.setTimeout(() => setPixCopied(false), 2500);
-    } catch {
-      setErrorMessage("Não foi possível copiar automaticamente. Selecione o código no aplicativo do seu banco.");
-    }
-  }
-
   async function finishOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
 
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get("name") ?? "");
-    const document = String(formData.get("document") ?? "");
-    const payer = { name, email, document };
+    const payer = { name, email };
 
     setSubmitting(true);
     try {
-      let cardPayload: { token: string; paymentMethodId: string; installments: number } | undefined;
-
-      if (method === "card") {
-        if (!mercadoPagoPublicKey) throw new Error("Pagamento com cartão indisponível no momento.");
-        const mp = mercadoPagoRef.current;
-        if (!mp) throw new Error("Não foi possível carregar o Mercado Pago. Atualize a página e tente novamente.");
-
-        const cardNumber = onlyDigits(String(formData.get("cardNumber") ?? ""));
-        const cardholderName = String(formData.get("cardName") ?? "").trim();
-        const expiry = String(formData.get("cardExpiry") ?? "");
-        const securityCode = onlyDigits(String(formData.get("cardCvv") ?? ""));
-        if (!/^\d{13,19}$/.test(cardNumber)) throw new Error("Confira o número do cartão informado.");
-        if (cardholderName.length < 2 || cardholderName.length > 120) throw new Error("Confira o nome impresso no cartão.");
-        if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry)) throw new Error("Informe a validade no formato MM/AA.");
-        if (!/^\d{3,4}$/.test(securityCode)) throw new Error("Confira o código de segurança do cartão.");
-        const [expirationMonth, expirationYearShort] = expiry.split("/");
-        const expirationDate = new Date(2000 + Number(expirationYearShort), Number(expirationMonth), 0, 23, 59, 59);
-        if (expirationDate.getTime() < Date.now()) throw new Error("O cartão informado está vencido.");
-
-        const paymentMethods = await mp.getPaymentMethods({ bin: cardNumber.slice(0, 6) });
-        const paymentMethodId = paymentMethods.results[0]?.id;
-        if (!paymentMethodId) throw new Error("Não reconhecemos a bandeira do cartão informado.");
-
-        const token = await mp.cardToken.create({
-          cardNumber,
-          cardholderName,
-          cardExpirationMonth: expirationMonth,
-          cardExpirationYear: `20${expirationYearShort}`,
-          securityCode,
-          identificationType: "CPF",
-          identificationNumber: onlyDigits(document),
-        });
-
-        cardPayload = { token: token.id, paymentMethodId, installments: 1 };
-      }
-
       const response = await fetch("/api/payments/create", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Idempotency-Key": idempotencyKeyRef.current ?? (idempotencyKeyRef.current = crypto.randomUUID()),
         },
-        body: JSON.stringify({ productSlug: product.slug, method, payer, card: cardPayload }),
+        body: JSON.stringify({ productSlug: product.slug, payer }),
       });
 
       const data = (await response.json().catch(() => ({}))) as {
         orderId?: string;
         status?: SubmissionStatus;
-        pix?: PixPaymentDetails;
+        checkoutUrl?: string;
         delivery?: DeliveryDetails;
         purchaseEventId?: string;
         accountUrl?: string;
@@ -252,24 +208,28 @@ export function Checkout({ product }: { product: Product }) {
 
       setOrderId(data.orderId);
       setStatus(data.status);
-      setPix(data.pix ?? null);
       setDelivery(data.delivery ?? null);
       setPurchaseEventId(data.purchaseEventId ?? null);
 
       if (data.status === "rejected" || data.status === "cancelled") {
         idempotencyKeyRef.current = null;
-        throw new Error("Pagamento não aprovado. Verifique os dados do cartão ou tente outra forma de pagamento.");
+        throw new Error("Não foi possível iniciar o pagamento. Tente novamente.");
       }
 
       try {
-        const recovery: RecoverableOrder = { orderId: data.orderId, method, createdAt: Date.now() };
+        const recovery: RecoverableOrder = { orderId: data.orderId, createdAt: Date.now() };
         window.localStorage.setItem(recoveryKey(product.slug), JSON.stringify(recovery));
       } catch {
         // A compra continua normalmente mesmo quando o navegador bloqueia o armazenamento local.
       }
 
-      setComplete(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (data.status === "approved") {
+        setComplete(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      if (!data.checkoutUrl) throw new Error("A Stripe não retornou uma página de pagamento válida.");
+      window.location.assign(data.checkoutUrl);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Não foi possível concluir o pagamento.");
     } finally {
@@ -279,7 +239,7 @@ export function Checkout({ product }: { product: Product }) {
 
   if (complete) {
     const statusLabel: Record<SubmissionStatus, string> = {
-      pending: method === "pix" ? "Aguardando Pix" : "Processando",
+      pending: "Aguardando confirmação",
       in_process: "Processando",
       approved: "Pagamento aprovado",
       rejected: "Pagamento recusado",
@@ -289,7 +249,6 @@ export function Checkout({ product }: { product: Product }) {
     };
     const isApproved = status === "approved";
     const isFailed = status === "rejected" || status === "cancelled" || status === "refunded" || status === "charged_back";
-    const isPixPending = method === "pix" && (status === "pending" || status === "in_process");
     const statusColor = isFailed ? "text-red-300" : "text-[#b8ff5c]";
 
     const resetPaymentAttempt = () => {
@@ -303,7 +262,6 @@ export function Checkout({ product }: { product: Product }) {
       setComplete(false);
       setOrderId(null);
       setStatus("pending");
-      setPix(null);
       setDelivery(null);
       setPurchaseEventId(null);
       setPollingExpired(false);
@@ -319,33 +277,19 @@ export function Checkout({ product }: { product: Product }) {
           </span>
           <p className="eyebrow relative mt-8 justify-center" aria-live="polite">Próxima etapa</p>
           <h1 className="display-title relative mt-4 text-4xl font-semibold text-white md:text-5xl" aria-live="polite">
-            {isFailed ? "Pagamento não concluído." : isPixPending ? "Pague com Pix." : isApproved ? "Pagamento aprovado." : "Pagamento em análise."}
+            {isFailed ? "Pagamento não concluído." : isApproved ? "Pagamento aprovado." : "Confirmando pagamento."}
           </h1>
           <p className="relative mx-auto mt-5 max-w-md leading-7 text-zinc-300">
             {isFailed ? (
               "A cobrança não foi concluída. Você pode voltar ao checkout e tentar novamente com segurança."
-            ) : isPixPending ? (
-              pix ? "Escaneie o QR Code ou copie o código abaixo no app do seu banco." : "Estamos consultando a confirmação do seu pedido. Se ainda não pagou, você pode gerar um novo Pix."
             ) : isApproved && delivery?.status === "ready" ? (
-              <>Seu acesso está liberado. Use o botão abaixo para baixar o material comprado por <strong className="text-white">{email}</strong>.</>
+              "Seu acesso está liberado. Use o botão abaixo para baixar o material com segurança."
             ) : isApproved ? (
               <>Seu pagamento foi confirmado. Se o download não aparecer, fale com o suporte pelo e-mail <strong className="text-white">{siteConfig.contactEmail}</strong>.</>
             ) : (
               "A confirmação pode levar alguns minutos. Esta página será atualizada automaticamente."
             )}
           </p>
-
-          {isPixPending && pix ? (
-            <div className="relative mt-8 flex flex-col items-center gap-4">
-              <div className="rounded-2xl border border-white/[.1] bg-white p-3">
-                <Image unoptimized src={`data:image/png;base64,${pix.qrCodeBase64}`} alt="QR Code para pagamento via Pix" width={220} height={220} />
-              </div>
-              <textarea readOnly value={pix.qrCode} aria-label="Código Pix copia e cola" className="h-20 w-full resize-none rounded-xl border border-white/[.1] bg-black/20 p-3 text-xs leading-5 text-zinc-300 outline-none focus-visible:ring-2 focus-visible:ring-blue-400" onFocus={(event) => event.currentTarget.select()} />
-              <Button type="button" variant="outline" size="md" onClick={copyPixCode} className="w-full">
-                <FiCopy /> {pixCopied ? "Código copiado!" : "Copiar código Pix"}
-              </Button>
-            </div>
-          ) : null}
 
           {errorMessage ? <div ref={errorRef} role="alert" tabIndex={-1} className="relative mt-5 flex items-start gap-3 rounded-2xl border border-red-400/25 bg-red-400/10 p-4 text-left text-sm text-red-100 outline-none focus-visible:ring-2 focus-visible:ring-red-300"><FiAlertCircle className="mt-0.5 shrink-0" aria-hidden="true" /><span>{errorMessage}</span></div> : null}
 
@@ -360,8 +304,6 @@ export function Checkout({ product }: { product: Product }) {
             <div className="relative mt-8 grid gap-3"><Button asChild size="lg" className="w-full"><a href={delivery.downloadUrl}><FiDownloadCloud /> Baixar meu e-book</a></Button><Button asChild variant="outline" size="lg" className="w-full"><Link href="/account"><FiPackage /> Acessar minha biblioteca</Link></Button></div>
           ) : isApproved ? (
             <Button asChild variant="outline" size="lg" className="relative mt-8 w-full"><a href={`mailto:${siteConfig.contactEmail}`}><FiMail /> Falar com o suporte</a></Button>
-          ) : isPixPending && !pix ? (
-            <Button type="button" size="lg" className="relative mt-8 w-full" onClick={resetPaymentAttempt}><SiPix /> Gerar um novo Pix</Button>
           ) : (
             <>
               {pollingExpired ? <Button type="button" size="lg" className="relative mt-8 w-full" onClick={() => { setPollingExpired(false); setPollingRun((run) => run + 1); }}><FiRefreshCw /> Verificar pagamento novamente</Button> : null}
@@ -375,7 +317,6 @@ export function Checkout({ product }: { product: Product }) {
 
   return (
     <main data-checkout className="relative min-h-screen overflow-hidden bg-[#070a10]">
-      {mercadoPagoPublicKey ? <Script src="https://sdk.mercadopago.com/js/v2" strategy="afterInteractive" onReady={handleMercadoPagoLoaded} onError={() => { mercadoPagoRef.current = null; setCardSdkStatus("error"); }} /> : null}
       <ProductEventTracker event="InitiateCheckout" product={{ slug: product.slug, title: product.title, price: product.price, currency: product.currency, category: productCategory }} />
       <div className="premium-grid pointer-events-none fixed inset-0 opacity-30" />
       <div className="pointer-events-none fixed -left-52 top-20 h-[520px] w-[520px] rounded-full bg-blue-600/[.08] blur-[150px]" />
@@ -399,39 +340,22 @@ export function Checkout({ product }: { product: Product }) {
             <div>
               <p className="eyebrow">Checkout seguro</p>
               <h1 className="display-title mt-3 text-3xl font-semibold text-white sm:text-4xl">Falta pouco para acessar.</h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400 sm:text-base">Confirme seus dados, escolha Pix ou cartão e receba o acesso assim que o pagamento for aprovado.</p>
+              <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400 sm:text-base">Confirme seus dados e continue para o ambiente seguro da Stripe. O acesso é liberado após a aprovação.</p>
             </div>
 
             <section aria-labelledby="checkout-dados-title">
               <div className="mb-5 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#b8ff5c] text-sm font-black text-black">1</span><div><h2 id="checkout-dados-title" className="display-title text-2xl font-bold text-white">Seus dados</h2><p className="mt-0.5 text-xs text-zinc-500">O e-mail identifica sua compra e permite contato de suporte.</p></div></div>
               <div className="grid gap-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 shadow-[inset_0_1px_rgba(255,255,255,.025),0_24px_70px_rgba(0,0,0,.12)] md:grid-cols-2 md:p-6">
-                <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Nome completo</span><Input required name="name" autoComplete="name" minLength={2} maxLength={120} placeholder="Como está no documento" /></label>
+                <label><span className="mb-2 block text-xs font-bold text-zinc-300">Nome completo</span><Input required name="name" autoComplete="name" minLength={2} maxLength={120} placeholder="Seu nome completo" /></label>
                 <label><span className="mb-2 block text-xs font-bold text-zinc-300">E-mail</span><Input required type="email" name="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@email.com" /></label>
-                <label><span className="mb-2 block text-xs font-bold text-zinc-300">CPF</span><Input required name="document" inputMode="numeric" minLength={11} maxLength={14} placeholder="000.000.000-00" /></label>
               </div>
             </section>
 
             <section aria-labelledby="checkout-pagamento-title">
-              <div className="mb-5 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#b8ff5c] text-sm font-black text-black">2</span><div><h2 id="checkout-pagamento-title" className="display-title text-2xl font-bold text-white">Pagamento</h2><p className="mt-0.5 text-xs text-zinc-500">Escolha a opção mais conveniente para você.</p></div></div>
-              <div className="grid grid-cols-2 gap-3" role="group" aria-label="Forma de pagamento">
-                <Button type="button" size="lg" variant={method === "pix" ? "primary" : "outline"} disabled={submitting} onClick={() => setMethod("pix")} aria-pressed={method === "pix"} className="h-16 rounded-2xl"><SiPix /> Pix</Button>
-                <Button type="button" size="lg" variant={method === "card" ? "primary" : "outline"} disabled={submitting || cardSdkStatus !== "ready"} onClick={() => setMethod("card")} aria-pressed={method === "card"} aria-describedby={cardSdkStatus === "error" || cardSdkStatus === "unavailable" ? "card-unavailable-message" : undefined} className="h-16 rounded-2xl"><FiCreditCard /> Cartão</Button>
+              <div className="mb-5 flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#b8ff5c] text-sm font-black text-black">2</span><div><h2 id="checkout-pagamento-title" className="display-title text-2xl font-bold text-white">Pagamento</h2><p className="mt-0.5 text-xs text-zinc-500">Cartão e Pix são processados no checkout seguro da Stripe.</p></div></div>
+              <div className="rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 sm:p-6">
+                <div className="flex items-start gap-4"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#b8ff5c]/10 text-xl text-[#b8ff5c]"><FiCreditCard aria-hidden="true" /></span><div><h3 className="font-bold text-white">Pagamento protegido pela Stripe</h3><p className="mt-2 text-sm leading-6 text-zinc-400">Na próxima etapa, escolha uma forma de pagamento disponível e conclua sem compartilhar os dados financeiros com a EscalaHub.</p></div></div>
               </div>
-
-              {cardSdkStatus === "error" || cardSdkStatus === "unavailable" ? <p id="card-unavailable-message" role="status" className="mt-3 text-xs leading-5 text-amber-200">Pagamento por cartão indisponível no momento. Você pode concluir a compra com Pix.</p> : null}
-
-              {method === "card" ? (
-                <div className="mt-4 grid gap-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 shadow-[inset_0_1px_rgba(255,255,255,.025)] md:grid-cols-2 md:p-6">
-                  <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Número do cartão</span><Input required name="cardNumber" inputMode="numeric" autoComplete="cc-number" minLength={13} maxLength={23} pattern="[0-9 ]{13,23}" placeholder="0000 0000 0000 0000" /></label>
-                  <label className="md:col-span-2"><span className="mb-2 block text-xs font-bold text-zinc-300">Nome no cartão</span><Input required name="cardName" autoComplete="cc-name" placeholder="NOME IMPRESSO NO CARTÃO" className="uppercase" /></label>
-                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">Validade</span><Input required name="cardExpiry" inputMode="numeric" autoComplete="cc-exp" placeholder="MM/AA" minLength={5} maxLength={5} pattern="(0[1-9]|1[0-2])/[0-9]{2}" /></label>
-                  <label><span className="mb-2 block text-xs font-bold text-zinc-300">CVV</span><Input required name="cardCvv" type="password" inputMode="numeric" autoComplete="cc-csc" minLength={3} maxLength={4} pattern="[0-9]{3,4}" placeholder="•••" aria-label="Código de segurança do cartão" /></label>
-                </div>
-              ) : (
-                <div className="mt-4 rounded-[26px] border border-white/[.085] bg-white/[.025] p-5 sm:p-6">
-                  <div className="flex items-start gap-4"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#b8ff5c]/10 text-xl text-[#b8ff5c]"><SiPix aria-hidden="true" /></span><div><h3 className="font-bold text-white">Pagamento rápido via Pix</h3><p className="mt-2 text-sm leading-6 text-zinc-400">Ao finalizar, você receberá o código Pix. A liberação do acesso acontece após a confirmação do pagamento.</p></div></div>
-                </div>
-              )}
             </section>
 
             {errorMessage ? (
@@ -442,7 +366,7 @@ export function Checkout({ product }: { product: Product }) {
 
             <div className="rounded-[26px] border border-[#b8ff5c]/20 bg-[#b8ff5c]/[.055] p-3 shadow-[0_20px_60px_rgba(184,255,92,.06)]">
               <Button type="submit" size="lg" isLoading={submitting} loadingLabel="Processando pagamento" className="group h-16 w-full rounded-2xl px-5 text-base shadow-[0_16px_50px_rgba(134,204,54,.32)] focus-visible:ring-[#b8ff5c] sm:px-7">
-                <span>{method === "pix" ? "Gerar Pix" : "Finalizar compra"}</span>
+                <span>Continuar para pagamento</span>
                 <span className="ml-auto flex items-center gap-2 border-l border-black/15 pl-4">{formattedPrice} <FiCheckCircle className="transition-transform duration-200 group-hover:scale-110" /></span>
               </Button>
               <p className="mt-3 flex items-center justify-center gap-2 px-2 text-center text-[11px] font-medium text-zinc-400"><FiLock className="text-[#b8ff5c]" /> Seus dados são enviados em ambiente protegido.</p>
@@ -515,8 +439,8 @@ export function Checkout({ product }: { product: Product }) {
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[.1] bg-[#080b10]/92 px-4 py-3 shadow-[0_-18px_55px_rgba(0,0,0,.38)] backdrop-blur-2xl lg:hidden">
         <div className="mx-auto flex max-w-md items-center gap-3">
           <div className="shrink-0"><span className="block text-[9px] font-bold uppercase tracking-[.1em] text-zinc-500">Pagamento único</span><strong className="display-title mt-0.5 block text-xl font-black text-white">{formattedPrice}</strong></div>
-          <Button type="submit" form="checkout-form" size="md" isLoading={submitting} loadingLabel="Processando" className="ml-auto h-12 min-w-44 flex-1 rounded-xl px-4 text-sm shadow-[0_12px_36px_rgba(134,204,54,.28)]" aria-label={`${method === "pix" ? "Gerar Pix" : "Finalizar compra"} por ${formattedPrice}`}>
-            {method === "pix" ? "Gerar Pix" : "Finalizar compra"}
+          <Button type="submit" form="checkout-form" size="md" isLoading={submitting} loadingLabel="Abrindo Stripe" className="ml-auto h-12 min-w-44 flex-1 rounded-xl px-4 text-sm shadow-[0_12px_36px_rgba(134,204,54,.28)]" aria-label={`Continuar para pagamento seguro de ${formattedPrice}`}>
+            Continuar
           </Button>
         </div>
       </div>
