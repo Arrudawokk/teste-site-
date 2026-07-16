@@ -64,8 +64,7 @@ export const products = [
     guaranteeDays: 7,
     platforms: ["Meta Ads", "Google Ads", "TikTok Ads"],
     delivery: {
-      sourceUrlEnvironmentVariable: "PRODUCT_TRAFEGO_DOWNLOAD_URL",
-      sourceAuthorizationEnvironmentVariable: "PRODUCT_TRAFEGO_DOWNLOAD_AUTHORIZATION",
+      objectKey: "products/trafego-pago-do-zero-a-escala/trafego-pago-do-zero-a-escala.pdf",
       fileName: "trafego-pago-do-zero-a-escala.pdf",
       contentType: "application/pdf",
     },

@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { getProductBySlug } from "@/lib/catalog";
 import { getDeliverySource, verifyDeliveryToken } from "@/lib/payments/delivery";
 import { getOrderStore, OrderStoreUnavailableError } from "@/lib/payments/orderStore";
-import { streamPrivateAsset } from "@/lib/storage/privateAssets";
+import {
+  createPrivateAssetDownloadUrl,
+  PrivateAssetNotFoundError,
+  PrivateAssetStoreUnavailableError,
+} from "@/lib/storage/privateAssets";
 
 export const runtime = "nodejs";
 
@@ -27,10 +31,16 @@ export async function GET(request: Request) {
 
     const product = getProductBySlug(order.productSlug);
     const source = product ? getDeliverySource(product) : null;
-    if (!source) return json({ error: "Arquivo temporariamente indisponível." }, 503);
+    if (!source) return json({ error: "Armazenamento privado não configurado." }, 503);
 
-    return (await streamPrivateAsset(source)) ?? json({ error: "Arquivo temporariamente indisponível." }, 502);
+    const downloadUrl = await createPrivateAssetDownloadUrl(source);
+    return new Response(null, {
+      status: 307,
+      headers: { ...NO_STORE_HEADERS, Location: downloadUrl.toString(), "Referrer-Policy": "no-referrer" },
+    });
   } catch (error) {
+    if (error instanceof PrivateAssetNotFoundError) return json({ error: "Arquivo não encontrado." }, 404);
+    if (error instanceof PrivateAssetStoreUnavailableError) return json({ error: "Arquivo temporariamente indisponível." }, 503);
     if (error instanceof OrderStoreUnavailableError) return json({ error: "Entrega temporariamente indisponível." }, 503);
     return json({ error: "Não foi possível entregar o arquivo." }, 502);
   }

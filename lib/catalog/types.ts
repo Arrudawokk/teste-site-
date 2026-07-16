@@ -50,8 +50,8 @@ export type ProductSeo = {
 };
 
 export type ProductDelivery = {
-  sourceUrlEnvironmentVariable: string;
-  sourceAuthorizationEnvironmentVariable?: string;
+  /** Chave privada do objeto dentro do bucket configurado no provider. */
+  objectKey: string;
   fileName: string;
   contentType: "application/pdf" | "application/epub+zip" | "application/zip";
 };
