@@ -112,6 +112,23 @@ export class StripeGateway implements PaymentGateway {
       }
       return result;
     } catch (error) {
+      console.error("===== STRIPE ERROR =====");
+      console.error(error);
+
+      if (error instanceof Stripe.errors.StripeError) {
+        console.error({
+          type: error.type,
+          code: error.code,
+          message: error.message,
+          param: error.param,
+          decline_code: error.decline_code,
+          request_id: error.requestId,
+          statusCode: error.statusCode,
+          raw: error.raw,
+          stack: error.stack,
+        });
+      }
+
       if (error instanceof PaymentGatewayError) throw error;
       throw new PaymentGatewayError("Falha ao criar sessão de pagamento na Stripe.", error);
     }
