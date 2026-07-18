@@ -68,7 +68,7 @@ Antes de aceitar vendas reais no domínio final:
 
 ## Produção
 
-- Branch oficial: `main`, com toda a sequência RC1–RC7.
+- Branch oficial: `main`, com toda a sequência RC1–RC8.
 - URL operacional validada para o checkout Stripe: `https://escala-hub-six.vercel.app`.
 - Home, produto, checkout, blog e conta respondem HTTP 200.
 - A URL canônica e os retornos da Stripe utilizam `NEXT_PUBLIC_SITE_URL` quando configurada e, na Vercel, recorrem automaticamente a `VERCEL_PROJECT_PRODUCTION_URL`.
@@ -174,5 +174,14 @@ Antes de aceitar vendas reais no domínio final:
 - Pedidos expirados ou cancelados podem gerar uma nova sessão com nova chave idempotente, somente depois da confirmação de que a anterior não está aberta.
 - A interface consulta o status a cada 10 segundos e redireciona pagamentos aprovados para `/account`.
 - Detalhes operacionais registrados em `docs/RC7_CHECKOUT_RECOVERY.md`.
+
+## Qualidade da RC8
+
+- Painel administrativo protegido com sessão opaca persistida, bloqueio de tentativas e autorização server-side em cada consulta e ação.
+- Dashboard operacional, pedidos paginados, clientes, eventos Stripe, logs estruturados, estatísticas responsivas e busca global.
+- Exportação segura em CSV e Excel, com proteção contra fórmulas injetadas em células.
+- Reprocessamento autoritativo de pedido sem nova cobrança, com reconciliação, preparação da conta e liberação condicionada à aprovação confirmada.
+- Trilha append-only para auditoria, downloads e payloads sanitizados de webhooks.
+- Migração aditiva `004_admin_operations.sql` e ativação documentada em `docs/ADMIN.md`.
 
 Consulte `docs/STRIPE.md`, `docs/STORAGE.md`, `docs/R2.md`, `RELEASE_NOTES.md`, `docs/ACCOUNT.md` e `docs/RC3_ANALYTICS.md` para configuração, fluxos e riscos operacionais atuais. Os relatórios RC anteriores permanecem como histórico do estado auditado na época.

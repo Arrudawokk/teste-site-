@@ -37,6 +37,11 @@ export async function issueCustomerSession(order: OrderRecord): Promise<Customer
   return session;
 }
 
+export async function ensureCustomerAccount(order: OrderRecord): Promise<CustomerSession["profile"] | null> {
+  if (order.status !== "approved" || order.accessStatus !== "granted") return null;
+  return getAccountStore().ensureAccount(order);
+}
+
 export async function revokeCustomerSession(): Promise<void> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;

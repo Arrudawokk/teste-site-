@@ -226,9 +226,6 @@ class PostgresOrderStore implements OrderStore {
         `;
         const current = currentRows[0];
         if (!current || (current.gateway_payment_id && current.gateway_payment_id !== update.gatewayPaymentId)) {
-          if (update.webhookEventKey) {
-            await transaction`DELETE FROM payment_webhook_events WHERE event_key = ${update.webhookEventKey}`;
-          }
           return { order: null, duplicate: false };
         }
 
@@ -240,9 +237,6 @@ class PostgresOrderStore implements OrderStore {
           LIMIT 1
         `;
         if (collisionRows.length > 0) {
-          if (update.webhookEventKey) {
-            await transaction`DELETE FROM payment_webhook_events WHERE event_key = ${update.webhookEventKey}`;
-          }
           return { order: null, duplicate: false };
         }
 

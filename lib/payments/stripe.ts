@@ -235,7 +235,7 @@ export class StripeGateway implements PaymentGateway {
     }
 
     if (!result) return null;
-    return { ...result, status: statusOverride ?? result.status, eventId: event.id };
+    return { ...result, status: statusOverride ?? result.status, eventId: event.id, eventType: event.type };
   }
 
   private async getPaymentByIntent(paymentIntentId: string): Promise<PaymentResult> {

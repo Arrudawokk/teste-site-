@@ -3,7 +3,18 @@ type LogFields = Record<string, string | number | boolean | null | undefined>;
 
 function writeLog(level: LogLevel, event: string, fields: LogFields = {}) {
   const sanitizedFields = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
-  const entry = JSON.stringify({ timestamp: new Date().toISOString(), level, event, ...sanitizedFields });
+  const entry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    event,
+    orderId: null,
+    gatewayPaymentId: null,
+    status: null,
+    requestId: null,
+    latencyMs: null,
+    source: "application",
+    ...sanitizedFields,
+  });
   const stream = level === "info" ? process.stdout : process.stderr;
   stream.write(`${entry}\n`);
 }

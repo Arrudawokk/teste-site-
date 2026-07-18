@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRequestId, scheduleDownloadAudit } from "@/lib/admin/observability";
 import { getProductBySlug } from "@/lib/catalog";
 import { getDeliverySource, verifyDeliveryToken } from "@/lib/payments/delivery";
 import { getOrderStore, OrderStoreUnavailableError } from "@/lib/payments/orderStore";
@@ -18,6 +19,7 @@ function json(body: object, status: number) {
 }
 
 export async function GET(request: Request) {
+  const requestId = getRequestId(request);
   const searchParams = new URL(request.url).searchParams;
   const orderId = searchParams.get("orderId")?.trim();
   const expires = searchParams.get("expires")?.trim();
@@ -26,22 +28,36 @@ export async function GET(request: Request) {
 
   try {
     const order = await getOrderStore().getByExternalReference(orderId);
-    if (!order || !verifyDeliveryToken(order, expires, signature)) return json({ error: "Link de download inválido ou expirado." }, 403);
-    if (order.status !== "approved" || order.accessStatus !== "granted") return json({ error: "Acesso ao produto indisponível." }, 403);
+    if (!order || !verifyDeliveryToken(order, expires, signature)) {
+      scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "forbidden" });
+      return json({ error: "Link de download inválido ou expirado." }, 403);
+    }
+    if (order.status !== "approved" || order.accessStatus !== "granted") {
+      scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "forbidden" });
+      return json({ error: "Acesso ao produto indisponível." }, 403);
+    }
 
     const product = getProductBySlug(order.productSlug);
     const source = product ? getDeliverySource(product) : null;
-    if (!source) return json({ error: "Armazenamento privado não configurado." }, 503);
+    if (!source) {
+      scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "unavailable" });
+      return json({ error: "Armazenamento privado não configurado." }, 503);
+    }
 
     const downloadUrl = await createPrivateAssetDownloadUrl(source);
+    scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "authorized" });
     return new Response(null, {
       status: 307,
       headers: { ...NO_STORE_HEADERS, Location: downloadUrl.toString(), "Referrer-Policy": "no-referrer" },
     });
   } catch (error) {
-    if (error instanceof PrivateAssetNotFoundError) return json({ error: "Arquivo não encontrado." }, 404);
-    if (error instanceof PrivateAssetStoreUnavailableError) return json({ error: "Arquivo temporariamente indisponível." }, 503);
-    if (error instanceof OrderStoreUnavailableError) return json({ error: "Entrega temporariamente indisponível." }, 503);
+    if (error instanceof PrivateAssetNotFoundError) {
+      scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "not_found" });
+      return json({ error: "Arquivo não encontrado." }, 404);
+    }
+    if (error instanceof PrivateAssetStoreUnavailableError) { scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "unavailable" }); return json({ error: "Arquivo temporariamente indisponível." }, 503); }
+    if (error instanceof OrderStoreUnavailableError) { scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "unavailable" }); return json({ error: "Entrega temporariamente indisponível." }, 503); }
+    scheduleDownloadAudit({ orderId, requestId, source: "delivery_token", result: "failed" });
     return json({ error: "Não foi possível entregar o arquivo." }, 502);
   }
 }

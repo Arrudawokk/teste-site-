@@ -119,6 +119,16 @@ Google Tag Manager
 
 ---
 
+# Operações administrativas
+
+`lib/admin/` concentra autenticação, consultas operacionais, auditoria, observabilidade e reconciliação. A interface em `/admin` consome exclusivamente essa camada e nunca acessa Stripe, armazenamento ou SQL diretamente.
+
+As sessões administrativas são opacas e persistidas no PostgreSQL. O `proxy.ts` aplica a barreira otimista, enquanto layouts, Server Actions e Route Handlers repetem a autorização no servidor. Eventos operacionais, webhooks e downloads formam uma trilha append-only; não existem rotas para apagar histórico.
+
+A migração `db/migrations/004_admin_operations.sql` e as variáveis `ADMIN_EMAIL` e `ADMIN_PASSWORD_HASH` ativam o painel. O procedimento está documentado em `docs/ADMIN.md`.
+
+---
+
 # Objetivo
 
 Construir uma plataforma escalável capaz de vender centenas de produtos digitais utilizando a mesma arquitetura.

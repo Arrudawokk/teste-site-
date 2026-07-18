@@ -54,4 +54,6 @@ export type PaymentResult = {
 export type WebhookNotification = PaymentResult & {
   /** Identificador imutável do evento no gateway, usado para idempotência. */
   eventId: string;
+  /** Tipo allowlisted do evento validado pelo adaptador do gateway. */
+  eventType: string;
 };

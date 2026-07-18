@@ -11,6 +11,7 @@ export class AccountStoreUnavailableError extends Error {
 }
 
 export interface AccountStore {
+  ensureAccount(order: OrderRecord): Promise<CustomerProfile>;
   createSession(order: OrderRecord, tokenHash: string, expiresAt: string): Promise<CustomerSession>;
   getSession(tokenHash: string): Promise<CustomerSession | null>;
   revokeSession(tokenHash: string): Promise<void>;
@@ -24,7 +25,7 @@ class InMemoryAccountStore implements AccountStore {
   private readonly accountsByEmail = new Map<string, CustomerProfile>();
   private readonly sessionsByHash = new Map<string, CustomerSession>();
 
-  async createSession(order: OrderRecord, tokenHash: string, expiresAt: string): Promise<CustomerSession> {
+  async ensureAccount(order: OrderRecord): Promise<CustomerProfile> {
     const email = normalizedEmail(order.payerEmail);
     const profile = this.accountsByEmail.get(email) ?? {
       id: randomUUID(),
@@ -34,6 +35,11 @@ class InMemoryAccountStore implements AccountStore {
     };
     if (!profile.name && order.payerName?.trim()) profile.name = order.payerName.trim();
     this.accountsByEmail.set(email, profile);
+    return { ...profile };
+  }
+
+  async createSession(order: OrderRecord, tokenHash: string, expiresAt: string): Promise<CustomerSession> {
+    const profile = await this.ensureAccount(order);
     const session = { id: randomUUID(), profile: { ...profile }, expiresAt };
     this.sessionsByHash.set(tokenHash, session);
     return session;
@@ -75,6 +81,23 @@ class PostgresAccountStore implements AccountStore {
 
   constructor(databaseUrl: string) {
     this.sql = postgres(databaseUrl, { max: 1, idle_timeout: 20, connect_timeout: 10, prepare: false, onnotice: () => undefined });
+  }
+
+  async ensureAccount(order: OrderRecord): Promise<CustomerProfile> {
+    try {
+      const rows = await this.sql<{ id: string; email: string; name: string | null; photo_url: string | null }[]>`
+        INSERT INTO customer_accounts (id, email, email_normalized, name)
+        VALUES (${randomUUID()}, ${order.payerEmail}, ${normalizedEmail(order.payerEmail)}, ${order.payerName?.trim() || null})
+        ON CONFLICT (email_normalized) DO UPDATE SET
+          email = EXCLUDED.email,
+          name = COALESCE(customer_accounts.name, EXCLUDED.name),
+          updated_at = NOW()
+        RETURNING id, email, name, photo_url
+      `;
+      return { id: rows[0].id, email: rows[0].email, name: rows[0].name, photoUrl: rows[0].photo_url };
+    } catch (error) {
+      throw new AccountStoreUnavailableError("Falha ao preparar a conta do cliente.", error);
+    }
   }
 
   async createSession(order: OrderRecord, tokenHash: string, expiresAt: string): Promise<CustomerSession> {

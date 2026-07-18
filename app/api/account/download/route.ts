@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRequestId, scheduleDownloadAudit } from "@/lib/admin/observability";
 import { getAuthorizedOrder } from "@/lib/account/data";
 import { getProductBySlug } from "@/lib/catalog";
 import { getDeliverySource } from "@/lib/payments/delivery";
@@ -20,23 +21,35 @@ function json(message: string, status: number) {
 }
 
 export async function GET(request: Request) {
+  const requestId = getRequestId(request);
   const orderId = new URL(request.url).searchParams.get("orderId")?.trim();
   if (!orderId || !UUID_PATTERN.test(orderId)) return json("Pedido inválido.", 400);
   try {
     const order = await getAuthorizedOrder(orderId);
-    if (!order) return json("Você não tem acesso a este produto.", 403);
+    if (!order) {
+      scheduleDownloadAudit({ orderId, requestId, source: "account", result: "forbidden" });
+      return json("Você não tem acesso a este produto.", 403);
+    }
     const product = getProductBySlug(order.productSlug);
     const asset = product ? getDeliverySource(product) : null;
-    if (!asset) return json("Armazenamento privado não configurado.", 503);
+    if (!asset) {
+      scheduleDownloadAudit({ orderId, requestId, source: "account", result: "unavailable" });
+      return json("Armazenamento privado não configurado.", 503);
+    }
     const downloadUrl = await createPrivateAssetDownloadUrl(asset);
+    scheduleDownloadAudit({ orderId, requestId, source: "account", result: "authorized" });
     return new Response(null, {
       status: 307,
       headers: { ...HEADERS, Location: downloadUrl.toString(), "Referrer-Policy": "no-referrer" },
     });
   } catch (error) {
-    if (error instanceof PrivateAssetNotFoundError) return json("Arquivo não encontrado.", 404);
-    if (error instanceof PrivateAssetStoreUnavailableError) return json("Arquivo temporariamente indisponível.", 503);
-    if (error instanceof AccountStoreUnavailableError || error instanceof OrderStoreUnavailableError) return json("Entrega temporariamente indisponível.", 503);
+    if (error instanceof PrivateAssetNotFoundError) {
+      scheduleDownloadAudit({ orderId, requestId, source: "account", result: "not_found" });
+      return json("Arquivo não encontrado.", 404);
+    }
+    if (error instanceof PrivateAssetStoreUnavailableError) { scheduleDownloadAudit({ orderId, requestId, source: "account", result: "unavailable" }); return json("Arquivo temporariamente indisponível.", 503); }
+    if (error instanceof AccountStoreUnavailableError || error instanceof OrderStoreUnavailableError) { scheduleDownloadAudit({ orderId, requestId, source: "account", result: "unavailable" }); return json("Entrega temporariamente indisponível.", 503); }
+    scheduleDownloadAudit({ orderId, requestId, source: "account", result: "failed" });
     return json("Não foi possível entregar o arquivo.", 502);
   }
 }
