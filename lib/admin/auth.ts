@@ -1,6 +1,6 @@
 import "server-only";
-import { createHash, pbkdf2 as pbkdf2Callback, randomBytes, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { compare, getRounds } from "bcryptjs";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { AdminSession } from "./types";
@@ -8,8 +8,7 @@ import { ADMIN_SESSION_COOKIE } from "./constants";
 import { getAdminStore } from "./store";
 
 const SESSION_SECONDS = 60 * 60 * 8;
-const PASSWORD_ITERATIONS_MIN = 210_000;
-const pbkdf2 = promisify(pbkdf2Callback);
+const BCRYPT_COST_MIN = 12;
 
 export class AdminConfigurationError extends Error {
   constructor(message: string) {
@@ -28,18 +27,14 @@ function normalizedAdminEmail(): string {
   return email;
 }
 
-function passwordHashParts(): { iterations: number; salt: Buffer; digest: Buffer } {
+function configuredPasswordHash(): string {
   const encoded = process.env.ADMIN_PASSWORD_HASH?.trim();
-  const [algorithm, iterationsValue, saltValue, digestValue] = encoded?.split("$") ?? [];
-  const iterations = Number(iterationsValue);
-  if (algorithm !== "pbkdf2_sha256" || !Number.isInteger(iterations) || iterations < PASSWORD_ITERATIONS_MIN || !saltValue || !digestValue) {
+  if (!encoded || !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(encoded)) {
     throw new AdminConfigurationError("ADMIN_PASSWORD_HASH não configurado corretamente.");
   }
   try {
-    const salt = Buffer.from(saltValue, "base64url");
-    const digest = Buffer.from(digestValue, "base64url");
-    if (salt.length < 16 || digest.length !== 32) throw new Error("invalid");
-    return { iterations, salt, digest };
+    if (getRounds(encoded) < BCRYPT_COST_MIN) throw new Error("invalid");
+    return encoded;
   } catch {
     throw new AdminConfigurationError("ADMIN_PASSWORD_HASH não configurado corretamente.");
   }
@@ -47,13 +42,13 @@ function passwordHashParts(): { iterations: number; salt: Buffer; digest: Buffer
 
 export async function verifyAdminCredentials(email: string, password: string): Promise<boolean> {
   const configuredEmail = normalizedAdminEmail();
-  const parts = passwordHashParts();
+  const passwordHash = configuredPasswordHash();
   const normalizedEmail = email.trim().toLowerCase();
   const normalizedBuffer = Buffer.from(normalizedEmail);
   const configuredBuffer = Buffer.from(configuredEmail);
   const emailMatch = normalizedBuffer.length === configuredBuffer.length && timingSafeEqual(normalizedBuffer, configuredBuffer);
-  const computed = await pbkdf2(password, parts.salt, parts.iterations, parts.digest.length, "sha256");
-  return emailMatch && timingSafeEqual(computed, parts.digest);
+  const passwordMatch = await compare(password, passwordHash);
+  return emailMatch && passwordMatch;
 }
 
 export function hashAdminIdentity(email: string): string {

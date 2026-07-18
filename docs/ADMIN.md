@@ -11,7 +11,7 @@ O painel em `/admin` é uma superfície operacional separada da área do cliente
 3. Configure `ADMIN_EMAIL` e o valor completo de `ADMIN_PASSWORD_HASH` na Vercel.
 4. Faça um novo deploy e acesse `/admin/entrar`.
 
-A senha nunca é persistida. O hash usa PBKDF2-SHA256 com salt aleatório e 210.000 iterações. A sessão administrativa é opaca, armazenada no PostgreSQL e enviada em cookie HttpOnly, Secure, SameSite Strict, com duração de oito horas.
+A senha nunca é persistida. O hash usa bcrypt com salt aleatório e custo mínimo 12. A sessão administrativa é opaca, armazenada no PostgreSQL e enviada em cookie HttpOnly, Secure, SameSite Strict, com duração de oito horas.
 
 ## Segurança
 

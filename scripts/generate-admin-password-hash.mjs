@@ -1,4 +1,4 @@
-import { pbkdf2Sync, randomBytes } from "node:crypto";
+import { hash } from "bcryptjs";
 
 async function readPassword() {
   if (!process.stdin.isTTY) {
@@ -39,10 +39,8 @@ async function readPassword() {
 try {
   const password = await readPassword();
   if (password.length < 12 || password.length > 256) throw new Error("A senha deve ter entre 12 e 256 caracteres.");
-  const iterations = 210_000;
-  const salt = randomBytes(18);
-  const digest = pbkdf2Sync(password, salt, iterations, 32, "sha256");
-  process.stdout.write(`ADMIN_PASSWORD_HASH=pbkdf2_sha256$${iterations}$${salt.toString("base64url")}$${digest.toString("base64url")}\n`);
+  const digest = await hash(password, 12);
+  process.stdout.write(`ADMIN_PASSWORD_HASH=${digest}\n`);
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : "Não foi possível gerar o hash."}\n`);
   process.exitCode = 1;

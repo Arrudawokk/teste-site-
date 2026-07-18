@@ -21,7 +21,7 @@ A RC8 adiciona uma superfície operacional protegida sem modificar o checkout, a
 
 - `lib/admin/store.ts` mantém o acesso aos dados atrás de um contrato único, com PostgreSQL em produção e memória apenas no desenvolvimento local.
 - `proxy.ts` aplica uma verificação otimista; páginas, Server Actions e APIs repetem a validação completa da sessão.
-- A senha administrativa nunca é armazenada. A autenticação usa PBKDF2-SHA256 com salt aleatório e 210.000 iterações.
+- A senha administrativa nunca é armazenada. A autenticação usa bcrypt com salt aleatório e custo mínimo 12.
 - Cookies administrativos são HttpOnly, Secure, SameSite Strict e expiram em oito horas.
 - CSV e Excel neutralizam conteúdo que poderia ser interpretado como fórmula.
 - Payloads persistidos usam allowlist e não guardam cartões, tokens, assinaturas ou corpos brutos.
